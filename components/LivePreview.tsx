@@ -24,7 +24,7 @@ const DEMO_PLANS: DemoPlan[] = [
   },
   {
     id: "demo-2",
-    title: "Fred again.. at the Bowl",
+    title: "Neon Tides at the Bowl",
     category: "Concert",
     timeframe: "This Month",
     specific_dates: "Oct 18",
