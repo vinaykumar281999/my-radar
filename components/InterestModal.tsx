@@ -14,6 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { CONTACT_HINT, Honeypot } from "@/components/Honeypot";
 import { createClient } from "@/lib/supabase/client";
 
 type InterestModalProps = {
@@ -37,6 +38,7 @@ export function InterestModal({
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
   const [message, setMessage] = useState("");
+  const [trap, setTrap] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
@@ -63,7 +65,10 @@ export function InterestModal({
     }
     setPending(true);
     try {
-      if (!demo) {
+      if (trap) {
+        // Honeypot filled → bot. Pretend it worked, save nothing.
+        await new Promise((r) => setTimeout(r, 400));
+      } else if (!demo) {
         const { error } = await createClient()
           .from("interests")
           .insert({
@@ -103,7 +108,8 @@ export function InterestModal({
             </Button>
           </div>
         ) : (
-          <form onSubmit={onSubmit} className="flex flex-col">
+          <form onSubmit={onSubmit} className="relative flex flex-col">
+            <Honeypot value={trap} onChange={setTrap} />
             <DrawerHeader className="text-left">
               <DrawerTitle className="text-lg font-bold">I&apos;m interested 👋</DrawerTitle>
               <DrawerDescription className="text-left">
@@ -133,8 +139,12 @@ export function InterestModal({
                   placeholder="@alex.rivera or +1 555 123 4567"
                   maxLength={60}
                   required
+                  aria-describedby="interest-contact-hint"
                   className="h-11 text-base"
                 />
+                <p id="interest-contact-hint" className="text-xs text-muted-foreground">
+                  {CONTACT_HINT}
+                </p>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="interest-message">

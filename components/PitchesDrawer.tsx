@@ -20,14 +20,13 @@ import type { Pitch, Plan } from "@/lib/types";
 type PitchesDrawerProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  userId: string;
   pitches: Pitch[];
   /** Called once a pitch is accepted or dismissed (remove it from the list). */
   onResolved: (pitchId: string) => void;
   onPlanAdded: (plan: Plan) => void;
 };
 
-export function PitchesDrawer({ open, onOpenChange, userId, pitches, onResolved, onPlanAdded }: PitchesDrawerProps) {
+export function PitchesDrawer({ open, onOpenChange, pitches, onResolved, onPlanAdded }: PitchesDrawerProps) {
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent className="mx-auto max-w-[560px]">
@@ -51,7 +50,6 @@ export function PitchesDrawer({ open, onOpenChange, userId, pitches, onResolved,
                 <PitchRow
                   key={pitch.id}
                   pitch={pitch}
-                  userId={userId}
                   onResolved={onResolved}
                   onPlanAdded={onPlanAdded}
                 />
@@ -66,12 +64,10 @@ export function PitchesDrawer({ open, onOpenChange, userId, pitches, onResolved,
 
 function PitchRow({
   pitch,
-  userId,
   onResolved,
   onPlanAdded,
 }: {
   pitch: Pitch;
-  userId: string;
   onResolved: (pitchId: string) => void;
   onPlanAdded: (plan: Plan) => void;
 }) {
@@ -79,28 +75,26 @@ function PitchRow({
 
   async function accept() {
     setPending("accept");
-    const supabase = createClient();
-    const { data: plan, error } = await supabase
-      .from("plans")
-      .insert({
-        user_id: userId,
-        title: pitch.title,
-        category: pitch.category,
-        timeframe: pitch.timeframe,
-        notes: pitch.notes,
-        status: "Just an Idea",
-        suggested_by_handle: publicAttribution(pitch.pitcher_handle, pitch.pitcher_name),
+    // One transaction server-side: marks the pitch accepted and creates the plan,
+    // only if it's still pending — so a double tap / second tab can't duplicate it.
+    const { data: plan, error } = await createClient()
+      .rpc("accept_pitch", {
+        p_pitch_id: pitch.id,
+        p_suggested_by: publicAttribution(pitch.pitcher_handle, pitch.pitcher_name),
       })
-      .select()
       .single<Plan>();
     if (error || !plan) {
-      setPending(null);
-      toast.error("Couldn't add that plan.");
+      if (error?.message.includes("pitch_not_pending")) {
+        // Already accepted/dismissed elsewhere — just drop it from the list.
+        onResolved(pitch.id);
+        toast("That pitch was already handled.");
+      } else {
+        setPending(null);
+        toast.error("Couldn't add that plan.");
+      }
       return;
     }
     onPlanAdded(plan);
-    // The plan exists now; if marking the pitch fails it just shows up again next load.
-    await supabase.from("plan_pitches").update({ status: "accepted" }).eq("id", pitch.id);
     onResolved(pitch.id);
     toast.success("Added to your Radar");
   }

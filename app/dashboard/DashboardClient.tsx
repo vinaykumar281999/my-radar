@@ -276,7 +276,6 @@ export function DashboardClient({ profile, initialPlans, initialPitches }: Dashb
       <PitchesDrawer
         open={pitchesOpen}
         onOpenChange={setPitchesOpen}
-        userId={profile.id}
         pitches={pitches}
         onResolved={(id) => setPitches((ps) => ps.filter((p) => p.id !== id))}
         onPlanAdded={onSaved}

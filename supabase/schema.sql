@@ -208,3 +208,87 @@ create policy "pitches_update_target" on public.plan_pitches
 create policy "pitches_delete_target" on public.plan_pitches
   for delete to authenticated
   using (auth.uid() = target_user_id);
+
+-- -----------------------------------------------------------------------------
+-- accept_pitch: atomically turn a pending pitch into a plan.
+-- SECURITY INVOKER, so RLS still applies: the caller must be the pitch's target
+-- (pitches_update_target) and the plan is inserted as them (plans_insert_own).
+-- The UPDATE ... WHERE status = 'pending' takes a row lock, so two concurrent
+-- calls can't both succeed — the second one finds no pending row and raises,
+-- and no duplicate plan is created.
+-- -----------------------------------------------------------------------------
+create or replace function public.accept_pitch(p_pitch_id uuid, p_suggested_by text)
+returns public.plans
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_pitch public.plan_pitches;
+  v_plan  public.plans;
+begin
+  update public.plan_pitches
+     set status = 'accepted'
+   where id = p_pitch_id
+     and target_user_id = auth.uid()
+     and status = 'pending'
+  returning * into v_pitch;
+
+  if not found then
+    raise exception 'pitch_not_pending'
+      using errcode = 'P0002',
+            hint = 'The pitch does not exist, is not yours, or was already accepted/dismissed.';
+  end if;
+
+  insert into public.plans (user_id, title, category, timeframe, notes, status, suggested_by_handle)
+  values (
+    v_pitch.target_user_id,
+    v_pitch.title,
+    v_pitch.category,
+    v_pitch.timeframe,
+    v_pitch.notes,
+    'Just an Idea',
+    nullif(left(trim(p_suggested_by), 61), '')
+  )
+  returning * into v_plan;
+
+  return v_plan;
+end;
+$$;
+
+revoke all on function public.accept_pitch(uuid, text) from public, anon;
+grant execute on function public.accept_pitch(uuid, text) to authenticated;
+
+-- -----------------------------------------------------------------------------
+-- Pitch rate cap: at most 10 pending pitches per target user per hour.
+-- SECURITY DEFINER so the count sees rows the (anon) inserter can't read;
+-- it only returns a yes/no via the exception, never row data.
+-- -----------------------------------------------------------------------------
+create or replace function public.enforce_pitch_rate_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if (
+    select count(*)
+      from public.plan_pitches
+     where target_user_id = new.target_user_id
+       and status = 'pending'
+       and created_at > now() - interval '1 hour'
+  ) >= 10 then
+    raise exception 'too_many_pitches'
+      using errcode = 'P0001',
+            hint = 'This person has 10 pending pitches from the last hour. Try again later.';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.enforce_pitch_rate_limit() from public, anon, authenticated;
+
+drop trigger if exists plan_pitches_rate_limit on public.plan_pitches;
+create trigger plan_pitches_rate_limit
+  before insert on public.plan_pitches
+  for each row execute function public.enforce_pitch_rate_limit();

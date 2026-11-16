@@ -14,6 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PillGroup } from "@/components/PillGroup";
+import { CONTACT_HINT, Honeypot } from "@/components/Honeypot";
 import { createClient } from "@/lib/supabase/client";
 import { CATEGORIES, TIMEFRAMES, type Category, type Timeframe } from "@/lib/types";
 
@@ -58,6 +59,7 @@ function PitchModal({
   const [name, setName] = useState("");
   const [handle, setHandle] = useState("");
   const [notes, setNotes] = useState("");
+  const [trap, setTrap] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
@@ -81,6 +83,13 @@ function PitchModal({
       return;
     }
     setPending(true);
+    if (trap) {
+      // Honeypot filled → bot. Pretend it worked, save nothing.
+      await new Promise((r) => setTimeout(r, 400));
+      setPending(false);
+      setSent(true);
+      return;
+    }
     const { error } = await createClient()
       .from("plan_pitches")
       .insert({
@@ -94,8 +103,12 @@ function PitchModal({
       });
     setPending(false);
     if (error) {
-      console.error(error);
-      setError("Couldn't send that — please try again.");
+      if (error.message.includes("too_many_pitches")) {
+        setError(`${hostFirstName} has a lot of pitches waiting right now. Try again in an hour!`);
+      } else {
+        console.error(error);
+        setError("Couldn't send that — please try again.");
+      }
       return;
     }
     setSent(true);
@@ -116,7 +129,8 @@ function PitchModal({
             </Button>
           </div>
         ) : (
-          <form onSubmit={onSubmit} className="flex min-h-0 flex-col">
+          <form onSubmit={onSubmit} className="relative flex min-h-0 flex-col">
+            <Honeypot value={trap} onChange={setTrap} />
             <DrawerHeader className="text-left">
               <DrawerTitle className="text-lg font-bold">Pitch a plan to {hostFirstName}</DrawerTitle>
               <DrawerDescription className="text-left">No account needed.</DrawerDescription>
@@ -159,9 +173,13 @@ function PitchModal({
                     placeholder="@alex.rivera"
                     maxLength={60}
                     required
+                    aria-describedby="pitch-handle-hint"
                     className="h-11 text-base"
                   />
                 </div>
+                <p id="pitch-handle-hint" className="col-span-2 -mt-1.5 text-xs text-muted-foreground">
+                  {CONTACT_HINT}
+                </p>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="pitch-notes">

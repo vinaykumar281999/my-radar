@@ -61,5 +61,46 @@ Run `npm run dev` and open http://localhost:3000. Use two browsers or a private 
 - [ ] `https://<domain>/<username>/opengraph-image` shows name + top 3 plans
 - [ ] Paste `https://<domain>/<username>` into WhatsApp / iMessage → preview card appears
 
+## 10. Plan Chain
+Setup: re-run `supabase/schema.sql`, then `node --env-file=.env.local scripts/check-rls.mjs --pitch <your-username>` → all PASS (dismiss the "[RLS check]" pitch afterwards).
+
+**Pitch from a private window**
+- [ ] Your public page → bottom card "Got an idea? Pitch a plan to <Name>" → drawer opens, no login
+- [ ] Contact field shows the hint "Instagram @handle or phone with country code…"
+- [ ] Submit with an empty idea → error; fill everything → "Pitched!"
+
+**Accept / dismiss (signed-in window)**
+- [ ] Reload `/dashboard` → header **Pitches** button shows **1**
+- [ ] Open drawer → pitch shows idea, timeframe, note, "from <name>" + tappable contact
+- [ ] **Add to My Radar** → plan appears in your list with "🔗 Chained with @handle"; badge drops to 0
+- [ ] Send another pitch, **Dismiss** it → gone, no plan created, doesn't come back on reload
+
+**Chain pill on the public page**
+- [ ] Accepted plan shows "🔗 Chained with @handle" on your public page
+- [ ] Pitch sent with a **phone number** as contact → pill shows the pitcher's first name, never the number
+
+**Double-accept (no duplicates)**
+- [ ] Send a pitch. Open `/dashboard` in **two tabs**, open Pitches in both
+- [ ] Tab 1: **Add to My Radar** → added. Tab 2: **Add to My Radar** → toast "That pitch was already handled.", pitch disappears
+- [ ] Reload → the plan exists **once**
+
+**Copy to my Radar (second account)**
+- [ ] Sign in as a second, onboarded account → open the first account's public page
+- [ ] Each plan card shows a small copy icon next to "I'm Interested" (not shown when signed out or on your own page)
+- [ ] Tap it → check icon + toast "Added to your Radar" → **View** → plan is in your dashboard as "Just an Idea" with "🔗 Chained with @<first-username>"
+
+**One-tap follow-up in the leads drawer**
+- [ ] Send interest with `@some.handle` → leads drawer shows a black `@some.handle ↗` chip → opens instagram.com/some.handle
+- [ ] Send interest with `+1 555 123 4567` → chip "WhatsApp +1 555…" → opens wa.me/15551234567
+- [ ] Send interest with plain text (e.g. "alex") → no chip, just the copy row
+
+**Spam protection**
+- [ ] Honeypot (do this for both the pitch drawer and the "I'm Interested" drawer): open the drawer, fill the visible fields, then paste this in the DevTools console and press Enter:
+  ```js
+  const el = document.querySelector('input[name=website]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, 'spam'); el.dispatchEvent(new Event('input', { bubbles: true }));
+  ```
+  Submit → the success screen shows, but **no** pitch/lead appears in the dashboard
+- [ ] Rate cap: send 10 pitches to the same profile within an hour (private window) → the 11th shows "<Name> has a lot of pitches waiting right now. Try again in an hour!" Dismissing/accepting pending ones frees up the cap.
+
 ## Known limitation
 - Unknown usernames return HTTP **200** (the not-found page streams in after the shell is sent). Visitors see the right page; only bots see a 200.
