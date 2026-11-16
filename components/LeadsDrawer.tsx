@@ -13,6 +13,8 @@ import {
 } from "@/components/ui/drawer";
 import { Skeleton } from "@/components/ui/skeleton";
 import { copyText } from "@/components/ShareButton";
+import { ContactChip } from "@/components/ContactChip";
+import { parseContact } from "@/lib/contact";
 import { createClient } from "@/lib/supabase/client";
 import type { Interest, Plan } from "@/lib/types";
 
@@ -132,14 +134,23 @@ function LeadRow({ lead, onRemove }: { lead: Interest; onRemove: () => void }) {
           <Trash2 className="text-muted-foreground" />
         </Button>
       </div>
-      <button
-        type="button"
-        onClick={copy}
-        className="mt-2 flex w-full items-center justify-between gap-2 rounded-lg bg-muted px-3 py-2 text-left text-sm font-medium transition-colors hover:bg-muted/70"
-      >
-        <span className="truncate">{lead.contact_handle}</span>
-        {copied ? <Check className="size-4 shrink-0 text-emerald-500" /> : <Copy className="size-4 shrink-0 text-muted-foreground" />}
-      </button>
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={copy}
+          className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg bg-muted px-3 py-2 text-left text-sm font-medium transition-colors hover:bg-muted/70"
+          aria-label={`Copy ${lead.contact_handle}`}
+        >
+          <span className="truncate">{lead.contact_handle}</span>
+          {copied ? <Check className="size-4 shrink-0 text-emerald-500" /> : <Copy className="size-4 shrink-0 text-muted-foreground" />}
+        </button>
+        {parseContact(lead.contact_handle) && (
+          <ContactChip
+            contact={lead.contact_handle}
+            className="h-9 shrink-0 rounded-lg px-3 [&>span]:max-w-28"
+          />
+        )}
+      </div>
       {lead.message && (
         <p className="mt-2 flex gap-2 text-sm text-foreground/80">
           <MessageCircle className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />

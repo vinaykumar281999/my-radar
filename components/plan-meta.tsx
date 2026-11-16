@@ -66,3 +66,24 @@ export function StatusPill({ status, className }: { status: Status; className?: 
     </span>
   );
 }
+
+/** Subtle "🔗 Chained with @handle" pill for plans that came from a pitch or a copy. */
+export function ChainPill({
+  plan,
+  className,
+}: {
+  plan: { suggested_by_handle: string | null; chained_from_plan_id: string | null };
+  className?: string;
+}) {
+  if (!plan.suggested_by_handle && !plan.chained_from_plan_id) return null;
+  return (
+    <span
+      className={cn(
+        "inline-flex max-w-full items-center gap-1 truncate rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground",
+        className,
+      )}
+    >
+      🔗 {plan.suggested_by_handle ? `Chained with ${plan.suggested_by_handle}` : "Chained"}
+    </span>
+  );
+}

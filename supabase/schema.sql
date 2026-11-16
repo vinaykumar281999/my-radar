@@ -45,6 +45,15 @@ create table if not exists public.plans (
 
 create index if not exists plans_user_id_idx on public.plans (user_id, is_archived);
 
+-- Plan Chain: who suggested a plan / which plan it was copied from.
+-- ALTERs (not in CREATE TABLE) so re-running this file upgrades existing databases.
+alter table public.plans
+  add column if not exists suggested_by_handle text
+    check (suggested_by_handle is null or char_length(suggested_by_handle) <= 61);
+alter table public.plans
+  add column if not exists chained_from_plan_id uuid
+    references public.plans (id) on delete set null;
+
 -- -----------------------------------------------------------------------------
 -- interests
 -- -----------------------------------------------------------------------------
@@ -60,6 +69,28 @@ create table if not exists public.interests (
 create index if not exists interests_plan_id_idx on public.interests (plan_id, created_at desc);
 
 -- -----------------------------------------------------------------------------
+-- plan_pitches (friends suggest plans to a profile owner)
+-- -----------------------------------------------------------------------------
+create table if not exists public.plan_pitches (
+  id              uuid primary key default gen_random_uuid(),
+  target_user_id  uuid not null references public.profiles (id) on delete cascade,
+  title           text not null check (char_length(title) between 1 and 80),
+  category        text not null
+                    check (category in ('Trip', 'Concert', 'Weekend', 'Sports', 'Food & Nightlife')),
+  timeframe       text not null
+                    check (timeframe in ('This Weekend', 'This Month', 'Next Month', 'This Quarter', 'Later This Year')),
+  pitcher_name    text not null check (char_length(pitcher_name) between 1 and 60),
+  pitcher_handle  text not null check (char_length(pitcher_handle) between 1 and 60),
+  notes           text check (notes is null or char_length(notes) <= 140),
+  status          text not null default 'pending'
+                    check (status in ('pending', 'accepted', 'dismissed')),
+  created_at      timestamptz not null default now()
+);
+
+create index if not exists plan_pitches_target_idx
+  on public.plan_pitches (target_user_id, status, created_at desc);
+
+-- -----------------------------------------------------------------------------
 -- Privileges (newer Supabase projects don't always auto-grant on new tables)
 -- -----------------------------------------------------------------------------
 grant usage on schema public to anon, authenticated;
@@ -69,6 +100,8 @@ grant select on public.plans to anon, authenticated;
 grant insert, update, delete on public.plans to authenticated;
 grant insert on public.interests to anon, authenticated;
 grant select, delete on public.interests to authenticated;
+grant insert on public.plan_pitches to anon, authenticated;
+grant select, update, delete on public.plan_pitches to authenticated;
 
 -- -----------------------------------------------------------------------------
 -- Row-Level Security
@@ -76,6 +109,7 @@ grant select, delete on public.interests to authenticated;
 alter table public.profiles  enable row level security;
 alter table public.plans     enable row level security;
 alter table public.interests enable row level security;
+alter table public.plan_pitches enable row level security;
 
 -- profiles: public read, owner write
 drop policy if exists "profiles_select_all"  on public.profiles;
@@ -147,3 +181,30 @@ create policy "interests_delete_owner" on public.interests
       where p.id = plan_id and p.user_id = auth.uid()
     )
   );
+
+-- plan_pitches: anyone can pitch (always as 'pending') to an existing profile;
+-- only the target user can read, accept/dismiss, or delete their pitches
+drop policy if exists "pitches_insert_anyone" on public.plan_pitches;
+drop policy if exists "pitches_select_target" on public.plan_pitches;
+drop policy if exists "pitches_update_target" on public.plan_pitches;
+drop policy if exists "pitches_delete_target" on public.plan_pitches;
+
+create policy "pitches_insert_anyone" on public.plan_pitches
+  for insert to anon, authenticated
+  with check (
+    status = 'pending'
+    and exists (select 1 from public.profiles pr where pr.id = target_user_id)
+  );
+
+create policy "pitches_select_target" on public.plan_pitches
+  for select to authenticated
+  using (auth.uid() = target_user_id);
+
+create policy "pitches_update_target" on public.plan_pitches
+  for update to authenticated
+  using (auth.uid() = target_user_id)
+  with check (auth.uid() = target_user_id);
+
+create policy "pitches_delete_target" on public.plan_pitches
+  for delete to authenticated
+  using (auth.uid() = target_user_id);

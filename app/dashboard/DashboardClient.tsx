@@ -10,6 +10,7 @@ import {
   Copy,
   ExternalLink,
   ImageDown,
+  Lightbulb,
   LogOut,
   Pencil,
   Plus,
@@ -20,7 +21,8 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/Avatar";
-import { CategoryLabel, STATUS_STYLES } from "@/components/plan-meta";
+import { CategoryLabel, ChainPill, STATUS_STYLES } from "@/components/plan-meta";
+import { PitchesDrawer } from "@/components/PitchesDrawer";
 import { QuickAddPlan } from "@/components/QuickAddPlan";
 import { LeadsDrawer } from "@/components/LeadsDrawer";
 import { StoryExportModal } from "@/components/StoryExportModal";
@@ -28,19 +30,22 @@ import { copyText } from "@/components/ShareButton";
 import { useOrigin } from "@/hooks/use-origin";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { STATUSES, sortPlans, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
+import { STATUSES, sortPlans, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
 
 type DashboardClientProps = {
   profile: Profile;
   initialPlans: PlanWithCount[];
+  initialPitches: Pitch[];
 };
 
-export function DashboardClient({ profile, initialPlans }: DashboardClientProps) {
+export function DashboardClient({ profile, initialPlans, initialPitches }: DashboardClientProps) {
   const [plans, setPlans] = useState<PlanWithCount[]>(initialPlans);
   const [composerOpen, setComposerOpen] = useState(false);
   const [editing, setEditing] = useState<Plan | null>(null);
   const [leadsPlan, setLeadsPlan] = useState<Plan | null>(null);
   const [storyOpen, setStoryOpen] = useState(false);
+  const [pitches, setPitches] = useState<Pitch[]>(initialPitches);
+  const [pitchesOpen, setPitchesOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const origin = useOrigin();
 
@@ -115,11 +120,28 @@ export function DashboardClient({ profile, initialPlans }: DashboardClientProps)
         <Link href="/" className="inline-flex items-center gap-2 text-lg font-bold tracking-tight">
           <RadarIcon className="size-5 text-primary" /> Radar
         </Link>
-        <form action="/auth/signout" method="post">
-          <Button type="submit" variant="ghost" size="sm" className="text-muted-foreground">
-            <LogOut /> Sign out
+        <div className="flex items-center gap-1">
+          <Button
+            variant={pitches.length > 0 ? "default" : "ghost"}
+            size="sm"
+            onClick={() => setPitchesOpen(true)}
+            className={cn("rounded-full", pitches.length === 0 && "text-muted-foreground")}
+            aria-label={`Friend pitches: ${pitches.length} pending`}
+          >
+            <Lightbulb />
+            Pitches
+            {pitches.length > 0 && (
+              <span className="ml-0.5 rounded-full bg-primary-foreground px-1.5 text-[11px] leading-4 font-bold text-primary tabular-nums">
+                {pitches.length}
+              </span>
+            )}
           </Button>
-        </form>
+          <form action="/auth/signout" method="post">
+            <Button type="submit" variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Sign out">
+              <LogOut />
+            </Button>
+          </form>
+        </div>
       </header>
 
       {/* Profile + top bar */}
@@ -251,6 +273,14 @@ export function DashboardClient({ profile, initialPlans }: DashboardClientProps)
         editing={editing}
         onSaved={onSaved}
       />
+      <PitchesDrawer
+        open={pitchesOpen}
+        onOpenChange={setPitchesOpen}
+        userId={profile.id}
+        pitches={pitches}
+        onResolved={(id) => setPitches((ps) => ps.filter((p) => p.id !== id))}
+        onPlanAdded={onSaved}
+      />
       <LeadsDrawer plan={leadsPlan} onOpenChange={(o) => !o && setLeadsPlan(null)} onCountChange={onCountChange} />
       <StoryExportModal open={storyOpen} onOpenChange={setStoryOpen} profile={profile} plans={plans} />
     </main>
@@ -286,6 +316,7 @@ function ManagePlanRow({ plan, onStatus, onEdit, onArchive, onDelete, onLeads }:
             {plan.timeframe}
             {plan.specific_dates && ` · ${plan.specific_dates}`}
           </p>
+          <ChainPill plan={plan} className="mt-1.5" />
         </div>
         <button
           type="button"

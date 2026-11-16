@@ -4,6 +4,8 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { Radar as RadarIcon } from "lucide-react";
 import { PlanCard } from "@/components/PlanCard";
+import { PitchPrompt } from "@/components/PitchModal";
+import { ViewerProvider } from "@/components/ViewerContext";
 import { ShareButton } from "@/components/ShareButton";
 import { Avatar } from "@/components/Avatar";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -58,7 +60,7 @@ async function RadarContent({ params }: { params: PageProps<"/[username]">["para
   const groups = groupByTimeframe(plans);
 
   return (
-    <>
+    <ViewerProvider>
       <header className="flex flex-col items-center text-center">
         <Avatar name={profile.display_name} src={profile.avatar_url} className="size-20 text-2xl" />
         <h1 className="mt-4 text-2xl font-bold tracking-tight">{profile.display_name}</h1>
@@ -88,14 +90,23 @@ async function RadarContent({ params }: { params: PageProps<"/[username]">["para
               </h2>
               <div className="space-y-3">
                 {group.plans.map((plan) => (
-                  <PlanCard key={plan.id} plan={plan} hostName={profile.display_name} />
+                  <PlanCard
+                    key={plan.id}
+                    plan={plan}
+                    hostName={profile.display_name}
+                    hostUsername={profile.username}
+                  />
                 ))}
               </div>
             </section>
           ))}
         </div>
       )}
-    </>
+
+      <div className="mt-8">
+        <PitchPrompt targetUserId={profile.id} hostName={profile.display_name} />
+      </div>
+    </ViewerProvider>
   );
 }
 

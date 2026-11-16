@@ -39,6 +39,9 @@ export type Plan = {
   status: Status;
   notes: string | null;
   is_archived: boolean;
+  /** "@handle" or a first name — never a phone number (see publicAttribution). */
+  suggested_by_handle: string | null;
+  chained_from_plan_id: string | null;
   created_at: string;
 };
 
@@ -50,6 +53,21 @@ export type Interest = {
   visitor_name: string;
   contact_handle: string;
   message: string | null;
+  created_at: string;
+};
+
+export type PitchStatus = "pending" | "accepted" | "dismissed";
+
+export type Pitch = {
+  id: string;
+  target_user_id: string;
+  title: string;
+  category: Category;
+  timeframe: Timeframe;
+  pitcher_name: string;
+  pitcher_handle: string;
+  notes: string | null;
+  status: PitchStatus;
   created_at: string;
 };
 
