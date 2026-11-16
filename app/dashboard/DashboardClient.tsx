@@ -1,0 +1,347 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import {
+  Archive,
+  ArchiveRestore,
+  CalendarDays,
+  Check,
+  Copy,
+  ExternalLink,
+  ImageDown,
+  LogOut,
+  Pencil,
+  Plus,
+  Radar as RadarIcon,
+  Trash2,
+  Users,
+} from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Avatar } from "@/components/Avatar";
+import { CategoryLabel, STATUS_STYLES } from "@/components/plan-meta";
+import { QuickAddPlan } from "@/components/QuickAddPlan";
+import { LeadsDrawer } from "@/components/LeadsDrawer";
+import { StoryExportModal } from "@/components/StoryExportModal";
+import { copyText } from "@/components/ShareButton";
+import { useOrigin } from "@/hooks/use-origin";
+import { createClient } from "@/lib/supabase/client";
+import { cn } from "@/lib/utils";
+import { STATUSES, sortPlans, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
+
+type DashboardClientProps = {
+  profile: Profile;
+  initialPlans: PlanWithCount[];
+};
+
+export function DashboardClient({ profile, initialPlans }: DashboardClientProps) {
+  const [plans, setPlans] = useState<PlanWithCount[]>(initialPlans);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [editing, setEditing] = useState<Plan | null>(null);
+  const [leadsPlan, setLeadsPlan] = useState<Plan | null>(null);
+  const [storyOpen, setStoryOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const origin = useOrigin();
+
+  const publicPath = `/${profile.username}`;
+  const shortLink = origin ? `${origin.replace(/^https?:\/\//, "")}${publicPath}` : publicPath;
+
+  const active = sortPlans(plans.filter((p) => !p.is_archived));
+  const archived = plans.filter((p) => p.is_archived);
+  const totalInterested = active.reduce((n, p) => n + p.interest_count, 0);
+
+  async function copyBioLink() {
+    if (await copyText(`${window.location.origin}${publicPath}`)) {
+      setCopied(true);
+      toast.success("Bio link copied — paste it in your Instagram bio");
+      setTimeout(() => setCopied(false), 2000);
+    } else {
+      toast.error("Couldn't copy the link");
+    }
+  }
+
+  function openNew() {
+    setEditing(null);
+    setComposerOpen(true);
+  }
+
+  function openEdit(plan: Plan) {
+    setEditing(plan);
+    setComposerOpen(true);
+  }
+
+  function onSaved(saved: Plan) {
+    setPlans((prev) => {
+      const existing = prev.find((p) => p.id === saved.id);
+      return existing
+        ? prev.map((p) => (p.id === saved.id ? { ...saved, interest_count: p.interest_count } : p))
+        : [{ ...saved, interest_count: 0 }, ...prev];
+    });
+  }
+
+  async function patchPlan(id: string, patch: Partial<Pick<Plan, "status" | "is_archived">>, successMsg?: string) {
+    const prev = plans;
+    setPlans((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    const { error } = await createClient().from("plans").update(patch).eq("id", id);
+    if (error) {
+      setPlans(prev);
+      toast.error("Couldn't update the plan");
+    } else if (successMsg) {
+      toast.success(successMsg);
+    }
+  }
+
+  async function deletePlan(id: string) {
+    const prev = plans;
+    setPlans((ps) => ps.filter((p) => p.id !== id));
+    const { error } = await createClient().from("plans").delete().eq("id", id);
+    if (error) {
+      setPlans(prev);
+      toast.error("Couldn't delete the plan");
+    } else {
+      toast.success("Plan deleted");
+    }
+  }
+
+  const onCountChange = useCallback((planId: string, count: number) => {
+    setPlans((ps) => ps.map((p) => (p.id === planId && p.interest_count !== count ? { ...p, interest_count: count } : p)));
+  }, []);
+
+  return (
+    <main className="mx-auto w-full max-w-2xl px-4 pt-4 pb-28">
+      {/* Header */}
+      <header className="flex items-center justify-between gap-3">
+        <Link href="/" className="inline-flex items-center gap-2 text-lg font-bold tracking-tight">
+          <RadarIcon className="size-5 text-primary" /> Radar
+        </Link>
+        <form action="/auth/signout" method="post">
+          <Button type="submit" variant="ghost" size="sm" className="text-muted-foreground">
+            <LogOut /> Sign out
+          </Button>
+        </form>
+      </header>
+
+      {/* Profile + top bar */}
+      <section className="tap-card mt-4 p-4">
+        <div className="flex items-center gap-3">
+          <Avatar name={profile.display_name} src={profile.avatar_url} className="ring-0" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-bold">{profile.display_name}</p>
+            <p className="truncate text-sm text-muted-foreground">{shortLink}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-2xl leading-none font-bold tabular-nums">{totalInterested}</p>
+            <p className="text-xs text-muted-foreground">interested</p>
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          <Button onClick={copyBioLink} className="h-auto flex-col gap-1 rounded-xl py-2.5 text-xs">
+            {copied ? <Check /> : <Copy />}
+            {copied ? "Copied!" : "Copy Bio Link"}
+          </Button>
+          <Button
+            variant="outline"
+            render={<Link href={publicPath} target="_blank" rel="noopener" />}
+            nativeButton={false}
+            className="h-auto flex-col gap-1 rounded-xl py-2.5 text-xs"
+          >
+            <ExternalLink />
+            Preview Page
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setStoryOpen(true)}
+            className="h-auto flex-col gap-1 rounded-xl py-2.5 text-xs"
+          >
+            <ImageDown />
+            Story Card
+          </Button>
+        </div>
+      </section>
+
+      {/* Quick add */}
+      <button
+        type="button"
+        onClick={openNew}
+        className="mt-5 flex w-full items-center gap-3 rounded-2xl border-2 border-dashed border-primary/30 bg-primary/5 px-4 py-4 text-left transition-colors hover:border-primary/60 hover:bg-primary/10"
+      >
+        <span className="grid size-9 place-items-center rounded-full bg-primary text-primary-foreground">
+          <Plus className="size-5" />
+        </span>
+        <span>
+          <span className="block font-semibold">Add a plan</span>
+          <span className="block text-sm text-muted-foreground">Trip, concert, hike… takes 15 seconds</span>
+        </span>
+      </button>
+
+      {/* Active plans */}
+      <section className="mt-8">
+        <h2 className="mb-3 text-xs font-bold tracking-widest text-muted-foreground uppercase">
+          On your radar · {active.length}
+        </h2>
+        {active.length === 0 ? (
+          <div className="tap-card px-6 py-10 text-center">
+            <p className="text-3xl">🛰️</p>
+            <p className="mt-3 font-semibold">Your radar is empty</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Post your first plan so friends can call dibs before you book.
+            </p>
+            <Button onClick={openNew} className="mt-4 rounded-full">
+              <Plus /> Add your first plan
+            </Button>
+          </div>
+        ) : (
+          <ul className="space-y-3">
+            {active.map((plan) => (
+              <ManagePlanRow
+                key={plan.id}
+                plan={plan}
+                onStatus={(status) => patchPlan(plan.id, { status })}
+                onEdit={() => openEdit(plan)}
+                onArchive={() => patchPlan(plan.id, { is_archived: true }, "Archived — hidden from your page")}
+                onDelete={() => deletePlan(plan.id)}
+                onLeads={() => setLeadsPlan(plan)}
+              />
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Archived */}
+      {archived.length > 0 && (
+        <details className="group mt-8">
+          <summary className="cursor-pointer list-none text-xs font-bold tracking-widest text-muted-foreground uppercase">
+            Archived · {archived.length} <span className="group-open:hidden">(show)</span>
+          </summary>
+          <ul className="mt-3 space-y-2">
+            {archived.map((plan) => (
+              <li key={plan.id} className="flex items-center gap-3 rounded-xl border bg-card/50 px-3 py-2.5">
+                <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">{plan.title}</span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => patchPlan(plan.id, { is_archived: false }, "Restored")}
+                >
+                  <ArchiveRestore /> Restore
+                </Button>
+                <Button size="icon-sm" variant="ghost" onClick={() => deletePlan(plan.id)} aria-label="Delete">
+                  <Trash2 />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      {/* Floating add button (mobile) */}
+      <Button
+        onClick={openNew}
+        size="icon-lg"
+        className="fixed right-5 bottom-[calc(1.25rem+env(safe-area-inset-bottom))] size-14 rounded-full shadow-lg shadow-primary/30 sm:hidden"
+        aria-label="Add a plan"
+      >
+        <Plus className="size-6" />
+      </Button>
+
+      <QuickAddPlan
+        open={composerOpen}
+        onOpenChange={setComposerOpen}
+        userId={profile.id}
+        editing={editing}
+        onSaved={onSaved}
+      />
+      <LeadsDrawer plan={leadsPlan} onOpenChange={(o) => !o && setLeadsPlan(null)} onCountChange={onCountChange} />
+      <StoryExportModal open={storyOpen} onOpenChange={setStoryOpen} profile={profile} plans={plans} />
+    </main>
+  );
+}
+
+type ManagePlanRowProps = {
+  plan: PlanWithCount;
+  onStatus: (status: Status) => void;
+  onEdit: () => void;
+  onArchive: () => void;
+  onDelete: () => void;
+  onLeads: () => void;
+};
+
+function ManagePlanRow({ plan, onStatus, onEdit, onArchive, onDelete, onLeads }: ManagePlanRowProps) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  useEffect(() => {
+    if (!confirmDelete) return;
+    const t = setTimeout(() => setConfirmDelete(false), 3000);
+    return () => clearTimeout(t);
+  }, [confirmDelete]);
+
+  return (
+    <li className="tap-card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <CategoryLabel category={plan.category} />
+          <p className="mt-1 leading-snug font-bold">{plan.title}</p>
+          <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <CalendarDays className="size-3" />
+            {plan.timeframe}
+            {plan.specific_dates && ` · ${plan.specific_dates}`}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onLeads}
+          className={cn(
+            "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold transition-colors",
+            plan.interest_count > 0
+              ? "bg-primary text-primary-foreground hover:bg-primary/85"
+              : "bg-muted text-muted-foreground hover:bg-muted/70",
+          )}
+          aria-label={`${plan.interest_count} interested — view`}
+        >
+          <Users className="size-4" />
+          <span className="tabular-nums">{plan.interest_count}</span>
+        </button>
+      </div>
+
+      {/* One-tap status toggle */}
+      <div role="radiogroup" aria-label="Status" className="mt-3 grid grid-cols-3 gap-1 rounded-xl bg-muted p-1">
+        {STATUSES.map((status) => {
+          const selected = plan.status === status;
+          return (
+            <button
+              key={status}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              onClick={() => !selected && onStatus(status)}
+              className={cn(
+                "flex h-8 items-center justify-center gap-1.5 rounded-lg text-xs font-semibold transition-all",
+                selected ? cn("ring-1 ring-inset", STATUS_STYLES[status].pill) : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {selected && <span className={cn("size-1.5 rounded-full", STATUS_STYLES[status].dot)} />}
+              {status}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-3 flex items-center gap-1 border-t pt-3">
+        <Button variant="ghost" size="sm" onClick={onEdit}>
+          <Pencil /> Edit
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onArchive}>
+          <Archive /> Archive
+        </Button>
+        <Button
+          variant={confirmDelete ? "destructive" : "ghost"}
+          size="sm"
+          className="ml-auto"
+          onClick={() => (confirmDelete ? onDelete() : setConfirmDelete(true))}
+        >
+          <Trash2 /> {confirmDelete ? "Tap to confirm" : "Delete"}
+        </Button>
+      </div>
+    </li>
+  );
+}

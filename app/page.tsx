@@ -1,69 +1,91 @@
-import Image from "next/image";
+import Link from "next/link";
+import { ArrowRight, BellRing, Link2, Radar as RadarIcon, Sparkles } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { LivePreview } from "@/components/LivePreview";
+import { StatusPill } from "@/components/plan-meta";
 
-export default function Home() {
+export default function LandingPage() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+    <div className="flex flex-1 flex-col">
+      <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-5 py-4">
+        <Link href="/" className="inline-flex items-center gap-2 text-lg font-bold tracking-tight">
+          <RadarIcon className="size-5 text-primary" /> Radar
+        </Link>
+        <Button variant="ghost" render={<Link href="/login" />} nativeButton={false}>
+          Sign in
+        </Button>
+      </header>
+
+      <main className="flex-1">
+        <section className="mx-auto grid w-full max-w-6xl items-center gap-14 px-5 pt-8 pb-20 lg:grid-cols-[1.1fr_1fr] lg:pt-16">
+          <div className="text-center lg:text-left">
+            <span className="inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
+              <Sparkles className="size-3.5 text-primary" /> The link-in-bio for your plans
+            </span>
+            <h1 className="mt-5 text-4xl leading-[1.05] font-extrabold tracking-tight text-balance sm:text-5xl lg:text-6xl">
+              Stop hearing{" "}
+              <span className="bg-gradient-to-r from-violet-600 via-fuchsia-500 to-orange-500 bg-clip-text text-transparent">
+                &ldquo;You should&apos;ve told me!&rdquo;
+              </span>
+            </h1>
+            <p className="mx-auto mt-5 max-w-xl text-lg text-pretty text-muted-foreground lg:mx-0">
+              Share your upcoming trips, concerts, and weekend plans in one link. Friends tap{" "}
+              <strong className="text-foreground">I&apos;m Interested 👋</strong> before the tickets are booked.
+            </p>
+
+            <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center lg:justify-start">
+              <Button
+                render={<Link href="/login" />}
+                nativeButton={false}
+                className="h-12 rounded-full px-7 text-base font-semibold shadow-lg shadow-primary/25"
+              >
+                Claim Your Link <ArrowRight />
+              </Button>
+              <span className="text-sm text-muted-foreground">Free · 30-second setup</span>
+            </div>
+
+            <div className="mt-6 flex flex-wrap justify-center gap-2 lg:justify-start">
+              <StatusPill status="Just an Idea" />
+              <StatusPill status="Booking Soon" />
+              <StatusPill status="Locked In" />
+            </div>
+          </div>
+
+          <LivePreview />
+        </section>
+
+        <section className="border-t bg-muted/30">
+          <div className="mx-auto grid w-full max-w-6xl gap-4 px-5 py-16 sm:grid-cols-3">
+            {[
+              {
+                icon: Link2,
+                title: "One link, every plan",
+                body: "Put radar.app/you in your Instagram bio or WhatsApp status. Update it in seconds.",
+              },
+              {
+                icon: BellRing,
+                title: "Friends raise their hand",
+                body: "No app or login for them — just name, handle, and an optional note.",
+              },
+              {
+                icon: Sparkles,
+                title: "Story-ready cards",
+                body: "Download a 9:16 card of your plans and drop it straight into your Story.",
+              },
+            ].map(({ icon: Icon, title, body }) => (
+              <div key={title} className="tap-card p-5">
+                <Icon className="size-6 text-primary" />
+                <h3 className="mt-3 font-bold">{title}</h3>
+                <p className="mt-1 text-sm text-muted-foreground">{body}</p>
+              </div>
+            ))}
+          </div>
+        </section>
       </main>
+
+      <footer className="border-t py-6 text-center text-xs text-muted-foreground">
+        Made for people who are always down. · <Link href="/login" className="underline underline-offset-2">Claim your link</Link>
+      </footer>
     </div>
   );
 }

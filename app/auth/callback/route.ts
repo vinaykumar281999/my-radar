@@ -1,0 +1,38 @@
+import { NextResponse, type NextRequest } from "next/server";
+import type { EmailOtpType } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/server";
+
+/**
+ * Landing point for magic-link / confirmation emails.
+ * Supports both the PKCE `?code=` flow and the `?token_hash=&type=` flow.
+ */
+export async function GET(request: NextRequest) {
+  const { searchParams, origin } = request.nextUrl;
+  const code = searchParams.get("code");
+  const tokenHash = searchParams.get("token_hash");
+  const type = searchParams.get("type") as EmailOtpType | null;
+  const next = safeNext(searchParams.get("next"));
+
+  const supabase = await createClient();
+
+  let error: unknown = null;
+  if (code) {
+    ({ error } = await supabase.auth.exchangeCodeForSession(code));
+  } else if (tokenHash && type) {
+    ({ error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash }));
+  } else {
+    error = new Error("Missing auth code");
+  }
+
+  if (error) {
+    console.error("auth callback", error);
+    return NextResponse.redirect(new URL("/login?error=link", origin));
+  }
+
+  return NextResponse.redirect(new URL(next, origin));
+}
+
+/** Only allow same-origin relative redirects. */
+function safeNext(next: string | null) {
+  return next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard";
+}
