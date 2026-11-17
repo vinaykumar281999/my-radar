@@ -63,6 +63,9 @@ export function CalendarFeed({ initialToken }: { initialToken: string | null }) 
             <span className="min-w-0 flex-1 truncate font-mono text-xs">{feedUrl ?? "…"}</span>
             {copied ? <Check className="size-4 shrink-0 text-emerald-500" /> : <Copy className="size-4 shrink-0" />}
           </button>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            Includes all your plans, including private ones. Don&apos;t share this link.
+          </p>
           <Button
             variant={state === "confirm" ? "destructive" : "outline"}
             size="sm"
