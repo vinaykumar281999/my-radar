@@ -9,6 +9,7 @@ import {
   Check,
   Copy,
   ExternalLink,
+  Eye,
   EyeOff,
   ImageDown,
   Link2,
@@ -31,6 +32,7 @@ import { QuickAddPlan } from "@/components/QuickAddPlan";
 import { LeadsDrawer } from "@/components/LeadsDrawer";
 import { MonthView } from "@/components/MonthView";
 import { JoinNotices } from "@/components/JoinNotices";
+import { ViewAsDrawer, type ViewAsMember } from "@/components/ViewAsDrawer";
 import { StoryExportModal } from "@/components/StoryExportModal";
 import { copyText } from "@/components/ShareButton";
 import { useOrigin } from "@/hooks/use-origin";
@@ -47,6 +49,7 @@ type DashboardClientProps = {
   circles: Pick<Circle, "id" | "name">[];
   /** plan id -> circle ids it's shared with */
   initialAudiences: Record<string, string[]>;
+  viewAsMembers: ViewAsMember[];
 };
 
 export function DashboardClient({
@@ -56,6 +59,7 @@ export function DashboardClient({
   initialJoinNotices,
   circles,
   initialAudiences,
+  viewAsMembers,
 }: DashboardClientProps) {
   const [plans, setPlans] = useState<PlanWithCount[]>(initialPlans);
   const [composerOpen, setComposerOpen] = useState(false);
@@ -69,6 +73,7 @@ export function DashboardClient({
   const [copied, setCopied] = useState(false);
   const [view, setView] = useState<"list" | "month">("list");
   const [audiences, setAudiences] = useState(initialAudiences);
+  const [viewAsOpen, setViewAsOpen] = useState(false);
   const circleNames = (planId: string) =>
     (audiences[planId] ?? []).map((id) => circles.find((c) => c.id === id)?.name).filter(Boolean) as string[];
   const origin = useOrigin();
@@ -217,6 +222,13 @@ export function DashboardClient({
           <div className="min-w-0 flex-1">
             <p className="truncate font-bold">{profile.display_name}</p>
             <p className="truncate text-sm text-muted-foreground">{shortLink}</p>
+            <button
+              type="button"
+              onClick={() => setViewAsOpen(true)}
+              className="mt-0.5 inline-flex items-center gap-1 text-xs font-semibold text-foreground/80 underline-offset-2 hover:underline"
+            >
+              <Eye className="size-3" /> View as…
+            </button>
           </div>
           <div className="text-right">
             <p className="text-2xl leading-none font-bold tabular-nums">{totalInterested}</p>
@@ -381,6 +393,15 @@ export function DashboardClient({
         onOpenChange={(o) => !o && setLeadsPlan(null)}
         onCountChange={onCountChange}
         onBlocked={onBlocked}
+      />
+      <ViewAsDrawer
+        open={viewAsOpen}
+        onOpenChange={setViewAsOpen}
+        hostName={profile.display_name}
+        hostUsername={profile.username}
+        members={viewAsMembers}
+        circles={circles}
+        audiences={audiences}
       />
       <StoryExportModal open={storyOpen} onOpenChange={setStoryOpen} profile={profile} plans={plans} />
     </main>

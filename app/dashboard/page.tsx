@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { DashboardClient } from "./DashboardClient";
+import type { ViewAsMember } from "@/components/ViewAsDrawer";
 import { Skeleton } from "@/components/ui/skeleton";
 import { requireProfile } from "@/lib/data/session";
 import type { Circle, JoinNotice, Pitch, Plan, PlanWithCount } from "@/lib/types";
@@ -24,6 +25,7 @@ async function DashboardData() {
     { data: notices, error: noticesError },
     { data: circles, error: circlesError },
     { data: audiences, error: audiencesError },
+    { data: members, error: membersError },
   ] = await Promise.all([
     supabase
       .from("plans")
@@ -51,6 +53,12 @@ async function DashboardData() {
       .returns<JoinNotice[]>(),
     supabase.from("circles").select("id, name").eq("owner_id", profile.id).order("name").returns<Pick<Circle, "id" | "name">[]>(),
     supabase.from("plan_audiences").select("plan_id, circle_id").eq("owner_id", profile.id).returns<{ plan_id: string; circle_id: string }[]>(),
+    // Members of my circles, for "View as".
+    supabase
+      .from("circle_members")
+      .select("circle_id, user_id, circles!inner(owner_id), profiles!circle_members_user_id_fkey(username, display_name)")
+      .eq("circles.owner_id", profile.id)
+      .returns<CircleMemberRow[]>(),
   ]);
 
   if (error) console.error("dashboard plans", error);
@@ -58,6 +66,20 @@ async function DashboardData() {
   if (noticesError) console.error("dashboard join notices", noticesError);
   if (circlesError) console.error("dashboard circles", circlesError);
   if (audiencesError) console.error("dashboard audiences", audiencesError);
+  if (membersError) console.error("dashboard members", membersError);
+
+  // One entry per person, with every circle of mine they're in.
+  const viewAs = new Map<string, ViewAsMember>();
+  for (const m of members ?? []) {
+    const entry = viewAs.get(m.user_id) ?? {
+      id: m.user_id,
+      username: m.profiles?.username ?? "unknown",
+      display_name: m.profiles?.display_name ?? "",
+      circleIds: [],
+    };
+    entry.circleIds.push(m.circle_id);
+    viewAs.set(m.user_id, entry);
+  }
 
   const audienceByPlan: Record<string, string[]> = {};
   for (const a of audiences ?? []) (audienceByPlan[a.plan_id] ??= []).push(a.circle_id);
@@ -75,9 +97,16 @@ async function DashboardData() {
       initialJoinNotices={notices ?? []}
       circles={circles ?? []}
       initialAudiences={audienceByPlan}
+      viewAsMembers={[...viewAs.values()].sort((a, b) => a.username.localeCompare(b.username))}
     />
   );
 }
+
+type CircleMemberRow = {
+  circle_id: string;
+  user_id: string;
+  profiles: { username: string; display_name: string } | null;
+};
 
 function DashboardSkeleton() {
   return (
