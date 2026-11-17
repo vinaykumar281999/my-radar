@@ -15,6 +15,7 @@ import {
   Pencil,
   Plus,
   Radar as RadarIcon,
+  Settings,
   Trash2,
   Users,
 } from "lucide-react";
@@ -135,6 +136,16 @@ export function DashboardClient({ profile, initialPlans, initialPitches }: Dashb
                 {pitches.length}
               </span>
             )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            render={<Link href="/settings" />}
+            nativeButton={false}
+            className="text-muted-foreground"
+            aria-label="Settings"
+          >
+            <Settings />
           </Button>
           <form action="/auth/signout" method="post">
             <Button type="submit" variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Sign out">

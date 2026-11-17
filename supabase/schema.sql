@@ -292,3 +292,107 @@ drop trigger if exists plan_pitches_rate_limit on public.plan_pitches;
 create trigger plan_pitches_rate_limit
   before insert on public.plan_pitches
   for each row execute function public.enforce_pitch_rate_limit();
+
+-- -----------------------------------------------------------------------------
+-- Username changes: old usernames keep redirecting and stay reserved for the
+-- original owner. Only the trigger below writes this table; nobody can read it
+-- directly (resolve_username() answers one lookup at a time).
+-- -----------------------------------------------------------------------------
+create table if not exists public.username_history (
+  username    text primary key check (username ~ '^[a-z0-9_]{3,30}$'),
+  user_id     uuid not null references public.profiles (id) on delete cascade,
+  changed_at  timestamptz not null default now()
+);
+
+create index if not exists username_history_user_idx on public.username_history (user_id);
+
+alter table public.username_history enable row level security;
+revoke all on public.username_history from anon, authenticated;
+
+create or replace function public.guard_username()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if tg_op = 'UPDATE' and new.username = old.username then
+    return new;
+  end if;
+
+  -- Serialize claims on the same name, so a rename and someone else's claim of
+  -- the freed name can't interleave.
+  perform pg_advisory_xact_lock(hashtext('username:' || new.username));
+  if tg_op = 'UPDATE' then
+    perform pg_advisory_xact_lock(hashtext('username:' || old.username));
+  end if;
+
+  if exists (
+    select 1 from public.username_history h
+     where h.username = new.username and h.user_id <> new.id
+  ) then
+    -- Same code as a unique violation, so clients treat it as "taken".
+    raise exception 'username_reserved' using errcode = '23505';
+  end if;
+
+  if tg_op = 'UPDATE' then
+    -- Taking back one of your own old names makes it current again.
+    delete from public.username_history where username = new.username;
+
+    if (select count(*) from public.username_history where user_id = new.id) >= 10 then
+      raise exception 'too_many_username_changes' using errcode = 'P0001';
+    end if;
+
+    insert into public.username_history (username, user_id)
+    values (old.username, old.id)
+    on conflict (username) do update set user_id = excluded.user_id, changed_at = now();
+  end if;
+
+  return new;
+end;
+$$;
+
+revoke all on function public.guard_username() from public, anon, authenticated;
+
+drop trigger if exists profiles_guard_username on public.profiles;
+create trigger profiles_guard_username
+  before insert or update of username on public.profiles
+  for each row execute function public.guard_username();
+
+-- Is this username free for the caller? (Their own current/old names count as free.)
+create or replace function public.username_available(p_username text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select lower(p_username) ~ '^[a-z0-9_]{3,30}$'
+     and not exists (
+       select 1 from public.profiles p
+        where p.username = lower(p_username) and p.id is distinct from auth.uid()
+     )
+     and not exists (
+       select 1 from public.username_history h
+        where h.username = lower(p_username) and h.user_id is distinct from auth.uid()
+     );
+$$;
+
+-- Current username for an old one (null if it was never renamed). Used by proxy.ts.
+create or replace function public.resolve_username(p_username text)
+returns text
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select p.username
+    from public.username_history h
+    join public.profiles p on p.id = h.user_id
+   where h.username = lower(p_username);
+$$;
+
+revoke all on function public.username_available(text) from public;
+revoke all on function public.resolve_username(text) from public;
+grant execute on function public.username_available(text) to anon, authenticated;
+grant execute on function public.resolve_username(text) to anon, authenticated;

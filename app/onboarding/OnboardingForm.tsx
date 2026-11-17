@@ -1,55 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Loader2, X } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useHost } from "@/hooks/use-origin";
+import { UsernameField, useUsernameAvailability } from "@/components/UsernameField";
 import { createClient } from "@/lib/supabase/client";
-import { RESERVED_USERNAMES, USERNAME_RE } from "@/lib/types";
-
-type Availability = "idle" | "checking" | "available" | "taken" | "invalid";
 
 export function OnboardingForm({ userId, suggestedUsername }: { userId: string; suggestedUsername: string }) {
   const router = useRouter();
   const [username, setUsername] = useState(suggestedUsername.length >= 3 ? suggestedUsername : "");
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
-  // Result of the last async lookup, keyed by the username it was for.
-  const [lookup, setLookup] = useState<{ username: string; result: "available" | "taken" | "idle" } | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const host = useHost() || "radar.app";
-
-  const isValid = USERNAME_RE.test(username) && !RESERVED_USERNAMES.has(username);
-  const availability: Availability = !username
-    ? "idle"
-    : !isValid
-      ? "invalid"
-      : lookup?.username === username
-        ? lookup.result
-        : "checking";
-
-  // Debounced availability check.
-  useEffect(() => {
-    if (!isValid) return;
-    let cancelled = false;
-    const t = setTimeout(async () => {
-      const { data, error } = await createClient()
-        .from("profiles")
-        .select("id")
-        .eq("username", username)
-        .maybeSingle();
-      if (cancelled) return;
-      setLookup({ username, result: error ? "idle" : data ? "taken" : "available" });
-    }, 350);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [username, isValid]);
+  const { availability, markTaken } = useUsernameAvailability(username);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -69,7 +36,7 @@ export function OnboardingForm({ userId, suggestedUsername }: { userId: string; 
     if (error) {
       setPending(false);
       setError(error.code === "23505" ? "That username was just taken — try another." : error.message);
-      if (error.code === "23505") setLookup({ username, result: "taken" });
+      if (error.code === "23505") markTaken();
       return;
     }
     router.replace("/dashboard");
@@ -78,36 +45,7 @@ export function OnboardingForm({ userId, suggestedUsername }: { userId: string; 
 
   return (
     <form onSubmit={onSubmit} className="mt-6 space-y-5">
-      <div className="space-y-1.5">
-        <Label htmlFor="username">Username</Label>
-        <div className="flex h-11 items-center rounded-lg border border-input bg-transparent pr-3 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30">
-          <span className="pl-3 text-base text-muted-foreground select-none">{host}/</span>
-          <input
-            id="username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 30))}
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            placeholder="yourname"
-            required
-            className="h-full min-w-0 flex-1 bg-transparent text-base font-medium outline-none"
-            aria-describedby="username-hint"
-          />
-          <AvailabilityIcon state={availability} />
-        </div>
-        <p id="username-hint" className="text-xs text-muted-foreground" aria-live="polite">
-          {availability === "invalid"
-            ? RESERVED_USERNAMES.has(username)
-              ? "That one's reserved."
-              : "3–30 characters: lowercase letters, numbers, underscores."
-            : availability === "taken"
-              ? "Already taken — try another."
-              : availability === "available"
-                ? "Nice, it's yours!"
-                : "Lowercase letters, numbers, and underscores."}
-        </p>
-      </div>
+      <UsernameField value={username} onChange={setUsername} availability={availability} />
 
       <div className="space-y-1.5">
         <Label htmlFor="display_name">Display name</Label>
@@ -152,11 +90,4 @@ export function OnboardingForm({ userId, suggestedUsername }: { userId: string; 
       </Button>
     </form>
   );
-}
-
-function AvailabilityIcon({ state }: { state: Availability }) {
-  if (state === "checking") return <Loader2 className="size-4 animate-spin text-muted-foreground" />;
-  if (state === "available") return <Check className="size-4 text-emerald-500" />;
-  if (state === "taken" || state === "invalid") return <X className="size-4 text-destructive" />;
-  return null;
 }

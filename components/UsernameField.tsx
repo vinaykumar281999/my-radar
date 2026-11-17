@@ -1,0 +1,115 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { Check, Loader2, X } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { useHost } from "@/hooks/use-origin";
+import { createClient } from "@/lib/supabase/client";
+import { RESERVED_USERNAMES, USERNAME_RE } from "@/lib/types";
+
+export type Availability = "idle" | "current" | "checking" | "available" | "taken" | "invalid";
+
+/** Lowercase, allowed characters only, max 30. */
+export function cleanUsername(raw: string) {
+  return raw.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 30);
+}
+
+/**
+ * Debounced availability check. Old usernames are reserved for their original
+ * owner, so this asks the database (username_available) rather than reading
+ * profiles directly. `current` is the caller's existing username, if any.
+ */
+export function useUsernameAvailability(username: string, current?: string) {
+  // Result of the last async lookup, keyed by the username it was for.
+  const [lookup, setLookup] = useState<{ username: string; result: "available" | "taken" | "idle" } | null>(null);
+
+  const isValid = USERNAME_RE.test(username) && !RESERVED_USERNAMES.has(username);
+  const isCurrent = !!current && username === current;
+
+  const availability: Availability = !username
+    ? "idle"
+    : isCurrent
+      ? "current"
+      : !isValid
+        ? "invalid"
+        : lookup?.username === username
+          ? lookup.result
+          : "checking";
+
+  useEffect(() => {
+    if (!isValid || isCurrent) return;
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      const { data, error } = await createClient().rpc("username_available", { p_username: username });
+      if (cancelled) return;
+      setLookup({ username, result: error ? "idle" : data ? "available" : "taken" });
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [username, isValid, isCurrent]);
+
+  return {
+    availability,
+    /** Call after the server reports the name was taken in the meantime. */
+    markTaken: () => setLookup({ username, result: "taken" }),
+  };
+}
+
+export function UsernameField({
+  value,
+  onChange,
+  availability,
+  hint,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  availability: Availability;
+  /** Extra line shown once a new name is confirmed available. */
+  hint?: string;
+}) {
+  const host = useHost() || "radar.app";
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor="username">Username</Label>
+      <div className="flex h-11 items-center rounded-lg border border-input bg-transparent pr-3 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30">
+        <span className="pl-3 text-base text-muted-foreground select-none">{host}/</span>
+        <input
+          id="username"
+          value={value}
+          onChange={(e) => onChange(cleanUsername(e.target.value))}
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          placeholder="yourname"
+          required
+          className="h-full min-w-0 flex-1 bg-transparent text-base font-medium outline-none"
+          aria-describedby="username-hint"
+        />
+        <AvailabilityIcon state={availability} />
+      </div>
+      <p id="username-hint" className="text-xs text-muted-foreground" aria-live="polite">
+        {availability === "invalid"
+          ? RESERVED_USERNAMES.has(value)
+            ? "That one's reserved."
+            : "3–30 characters: lowercase letters, numbers, underscores."
+          : availability === "taken"
+            ? "Already taken — try another."
+            : availability === "available"
+              ? (hint ?? "Nice, it's yours!")
+              : availability === "current"
+                ? "This is your current username."
+                : "Lowercase letters, numbers, and underscores."}
+      </p>
+    </div>
+  );
+}
+
+function AvailabilityIcon({ state }: { state: Availability }) {
+  if (state === "checking") return <Loader2 className="size-4 animate-spin text-muted-foreground" />;
+  if (state === "available") return <Check className="size-4 text-emerald-500" />;
+  if (state === "taken" || state === "invalid") return <X className="size-4 text-destructive" />;
+  return null;
+}
