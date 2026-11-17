@@ -61,6 +61,13 @@ alter table public.plans
 alter table public.profiles
   add column if not exists pitches_paused boolean not null default false;
 
+-- Calendar: optional real dates (all-day, inclusive). timeframe stays for fuzzy plans.
+alter table public.plans add column if not exists start_date date;
+alter table public.plans add column if not exists end_date date;
+alter table public.plans drop constraint if exists plans_dates_order;
+alter table public.plans add constraint plans_dates_order
+  check (end_date is null or (start_date is not null and end_date >= start_date));
+
 -- -----------------------------------------------------------------------------
 -- interests
 -- -----------------------------------------------------------------------------
@@ -630,6 +637,52 @@ $$;
 
 revoke all on function public.get_public_plan(uuid) from public;
 grant execute on function public.get_public_plan(uuid) to anon, authenticated;
+
+-- -----------------------------------------------------------------------------
+-- Private iCal feed: one secret token per user. Owner-only (the token is a
+-- password for the feed, so it is not on the publicly readable profiles table).
+-- The feed route reads it with the service role.
+-- -----------------------------------------------------------------------------
+create table if not exists public.calendar_feeds (
+  user_id     uuid primary key references public.profiles (id) on delete cascade,
+  -- 64 hex chars from two random UUIDs (gen_random_uuid is built in, no extension needed)
+  token       text not null unique
+                default replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''),
+  created_at  timestamptz not null default now()
+);
+
+alter table public.calendar_feeds enable row level security;
+revoke all on public.calendar_feeds from anon, authenticated;
+grant select on public.calendar_feeds to authenticated;
+
+drop policy if exists "calendar_feeds_select_own" on public.calendar_feeds;
+create policy "calendar_feeds_select_own" on public.calendar_feeds
+  for select to authenticated using (auth.uid() = user_id);
+
+-- Create the caller's feed token, or replace it (the old URL stops working).
+create or replace function public.regenerate_calendar_token()
+returns text
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_token text;
+begin
+  if auth.uid() is null then
+    raise exception 'not_signed_in' using errcode = '42501';
+  end if;
+  insert into public.calendar_feeds (user_id) values (auth.uid())
+  on conflict (user_id) do update
+    set token = replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''),
+        created_at = now()
+  returning token into v_token;
+  return v_token;
+end;
+$$;
+
+revoke all on function public.regenerate_calendar_token() from public, anon;
+grant execute on function public.regenerate_calendar_token() to authenticated;
 
 -- =============================================================================
 -- service_role (server-only key): keep this section last so it covers every

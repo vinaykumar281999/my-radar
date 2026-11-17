@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { ArrowLeft } from "lucide-react";
 import { ProfileSettings } from "./ProfileSettings";
 import { BlockedList, PausePitches } from "./OwnerControls";
+import { CalendarFeed } from "./CalendarFeed";
 import { Skeleton } from "@/components/ui/skeleton";
 import { requireProfile } from "@/lib/data/session";
 import type { BlockedContact } from "@/lib/types";
@@ -31,17 +32,21 @@ export default function SettingsPage() {
 
 async function SettingsData() {
   const { supabase, profile } = await requireProfile();
-  const { data: blocked, error } = await supabase
-    .from("blocked_contacts")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .returns<BlockedContact[]>();
+  const [{ data: blocked, error }, { data: feed }] = await Promise.all([
+    supabase
+      .from("blocked_contacts")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .returns<BlockedContact[]>(),
+    supabase.from("calendar_feeds").select("token").maybeSingle<{ token: string }>(),
+  ]);
   if (error) console.error("settings blocked_contacts", error);
 
   return (
     <div className="mt-6 space-y-6">
       <ProfileSettings profile={profile} />
       <PausePitches userId={profile.id} initialPaused={profile.pitches_paused} />
+      <CalendarFeed initialToken={feed?.token ?? null} />
       <BlockedList initialBlocked={blocked ?? []} />
     </div>
   );

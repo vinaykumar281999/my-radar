@@ -7,6 +7,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { CategoryLabel, ChainPill, StatusPill } from "@/components/plan-meta";
 import { InterestModal } from "@/components/InterestModal";
+import { AddToCalendar } from "@/components/AddToCalendar";
+import { formatDateRange } from "@/lib/dates";
 import { useViewer } from "@/components/ViewerContext";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -14,7 +16,7 @@ import type { Plan } from "@/lib/types";
 
 type PlanCardProps = {
   plan: Pick<Plan, "id" | "title" | "category" | "timeframe" | "specific_dates" | "status" | "notes"> &
-    Partial<Pick<Plan, "user_id" | "suggested_by_handle" | "chained_from_plan_id">>;
+    Partial<Pick<Plan, "user_id" | "suggested_by_handle" | "chained_from_plan_id" | "start_date" | "end_date">>;
   hostName: string;
   /** Host's username — enables "Copy to my Radar" attribution. */
   hostUsername?: string;
@@ -36,10 +38,10 @@ export function PlanCard({ plan, hostName, hostUsername, demo, className }: Plan
 
       <h3 className="mt-2 text-lg leading-snug font-bold tracking-tight text-balance">{plan.title}</h3>
 
-      {plan.specific_dates && (
+      {(plan.start_date || plan.specific_dates) && (
         <p className="mt-1 inline-flex items-center gap-1.5 text-sm text-muted-foreground">
           <CalendarDays className="size-3.5" aria-hidden />
-          {plan.specific_dates}
+          {plan.start_date ? formatDateRange(plan.start_date, plan.end_date) : plan.specific_dates}
         </p>
       )}
 
@@ -59,6 +61,15 @@ export function PlanCard({ plan, hostName, hostUsername, demo, className }: Plan
         </Button>
         {canCopy && <CopyToRadarButton plan={plan} viewerId={viewer.id} hostUsername={hostUsername} />}
       </div>
+
+      {plan.start_date && !demo && (
+        <AddToCalendar
+          plan={{ ...plan, start_date: plan.start_date }}
+          hostName={hostName}
+          hostUsername={hostUsername}
+          className="mt-3"
+        />
+      )}
 
       <InterestModal
         open={open}
@@ -94,6 +105,8 @@ function CopyToRadarButton({
         category: plan.category,
         timeframe: plan.timeframe,
         specific_dates: plan.specific_dates,
+        start_date: plan.start_date ?? null,
+        end_date: plan.end_date ?? null,
         notes: plan.notes,
         status: "Just an Idea",
         chained_from_plan_id: plan.id,

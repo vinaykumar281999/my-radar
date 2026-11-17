@@ -28,11 +28,13 @@ import { CategoryLabel, ChainPill, STATUS_STYLES } from "@/components/plan-meta"
 import { PitchesDrawer } from "@/components/PitchesDrawer";
 import { QuickAddPlan } from "@/components/QuickAddPlan";
 import { LeadsDrawer } from "@/components/LeadsDrawer";
+import { MonthView } from "@/components/MonthView";
 import { StoryExportModal } from "@/components/StoryExportModal";
 import { copyText } from "@/components/ShareButton";
 import { useOrigin } from "@/hooks/use-origin";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
+import { formatDateRange } from "@/lib/dates";
 import { STATUSES, sortPlans, type BlockResult, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
 
 type DashboardClientProps = {
@@ -52,6 +54,7 @@ export function DashboardClient({ profile, initialPlans, initialPitches }: Dashb
   const [pitches, setPitches] = useState<Pitch[]>(initialPitches);
   const [pitchesOpen, setPitchesOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [view, setView] = useState<"list" | "month">("list");
   const origin = useOrigin();
 
   const publicPath = `/${profile.username}`;
@@ -237,10 +240,31 @@ export function DashboardClient({ profile, initialPlans, initialPitches }: Dashb
 
       {/* Active plans */}
       <section className="mt-8">
-        <h2 className="mb-3 text-xs font-bold tracking-widest text-muted-foreground uppercase">
-          On your radar · {active.length}
-        </h2>
-        {active.length === 0 ? (
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="text-xs font-bold tracking-widest text-muted-foreground uppercase">
+            On your radar · {active.length}
+          </h2>
+          <div role="radiogroup" aria-label="View" className="flex rounded-lg bg-muted p-0.5 text-xs font-semibold">
+            {(["list", "month"] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                role="radio"
+                aria-checked={view === v}
+                onClick={() => setView(v)}
+                className={cn(
+                  "rounded-md px-2.5 py-1 capitalize transition-colors",
+                  view === v ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+        {view === "month" ? (
+          <MonthView plans={active} onSelect={openEdit} />
+        ) : active.length === 0 ? (
           <div className="tap-card px-6 py-10 text-center">
             <p className="text-3xl">🛰️</p>
             <p className="mt-3 font-semibold">Your radar is empty</p>
@@ -362,8 +386,9 @@ function ManagePlanRow({ plan, onStatus, onEdit, onArchive, onDelete, onLeads, o
           <p className="mt-1 leading-snug font-bold">{plan.title}</p>
           <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
             <CalendarDays className="size-3" />
-            {plan.timeframe}
-            {plan.specific_dates && ` · ${plan.specific_dates}`}
+            {plan.start_date
+              ? formatDateRange(plan.start_date, plan.end_date)
+              : `${plan.timeframe}${plan.specific_dates ? ` · ${plan.specific_dates}` : ""}`}
           </p>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {plan.visibility === "unlisted" && (

@@ -1,3 +1,5 @@
+import { addDays, todayIso, toUtcDate } from "@/lib/dates";
+
 export const CATEGORIES = [
   "Trip",
   "Concert",
@@ -40,6 +42,9 @@ export type Plan = {
   category: Category;
   timeframe: Timeframe;
   specific_dates: string | null;
+  /** All-day "YYYY-MM-DD", optional; end_date is inclusive. */
+  start_date: string | null;
+  end_date: string | null;
   status: Status;
   notes: string | null;
   is_archived: boolean;
@@ -93,7 +98,15 @@ export type BlockResult = {
 
 export type PlanInput = Pick<
   Plan,
-  "title" | "category" | "timeframe" | "specific_dates" | "status" | "notes" | "visibility"
+  | "title"
+  | "category"
+  | "timeframe"
+  | "specific_dates"
+  | "start_date"
+  | "end_date"
+  | "status"
+  | "notes"
+  | "visibility"
 >;
 
 export const USERNAME_RE = /^[a-z0-9_]{3,30}$/;
@@ -103,18 +116,50 @@ export const RESERVED_USERNAMES = new Set([
   "admin", "settings", "about", "help", "radar", "_next",
 ]);
 
-/** Sort plans soonest-timeframe first, newest first within a timeframe. */
-export function sortPlans<T extends Plan>(plans: T[]): T[] {
+type Sortable = Pick<Plan, "timeframe" | "created_at"> & Partial<Pick<Plan, "start_date">>;
+
+/**
+ * The bucket a plan belongs in today. Dated plans move between buckets as
+ * time passes; undated (fuzzy) plans keep the timeframe they were given.
+ */
+export function effectiveTimeframe(plan: Sortable, today = todayIso()): Timeframe {
+  const start = plan.start_date;
+  if (!start || start < today) return plan.timeframe;
+
+  const t = toUtcDate(today);
+  const d = toUtcDate(start);
+  const daysToSunday = (7 - t.getUTCDay()) % 7;
+  const weekday = d.getUTCDay();
+  if (start <= addDays(today, daysToSunday) && (weekday === 5 || weekday === 6 || weekday === 0)) {
+    return "This Weekend";
+  }
+
+  const monthsAhead = (d.getUTCFullYear() - t.getUTCFullYear()) * 12 + (d.getUTCMonth() - t.getUTCMonth());
+  if (monthsAhead === 0) return "This Month";
+  if (monthsAhead === 1) return "Next Month";
+  const sameQuarter =
+    d.getUTCFullYear() === t.getUTCFullYear() && Math.floor(d.getUTCMonth() / 3) === Math.floor(t.getUTCMonth() / 3);
+  return sameQuarter ? "This Quarter" : "Later This Year";
+}
+
+/** Soonest bucket first; within a bucket, dated plans by date, then newest first. */
+export function sortPlans<T extends Sortable>(plans: T[], today = todayIso()): T[] {
+  const rank = (p: T) => TIMEFRAMES.indexOf(effectiveTimeframe(p, today));
   return [...plans].sort(
     (a, b) =>
-      TIMEFRAMES.indexOf(a.timeframe) - TIMEFRAMES.indexOf(b.timeframe) ||
+      rank(a) - rank(b) ||
+      (a.start_date && b.start_date ? a.start_date.localeCompare(b.start_date) : 0) ||
+      (a.start_date ? -1 : 0) - (b.start_date ? -1 : 0) ||
       b.created_at.localeCompare(a.created_at),
   );
 }
 
-export function groupByTimeframe<T extends Plan>(plans: T[]) {
+export function groupByTimeframe<T extends Sortable>(plans: T[], today = todayIso()) {
   return TIMEFRAMES.map((timeframe) => ({
     timeframe,
-    plans: sortPlans(plans.filter((p) => p.timeframe === timeframe)),
+    plans: sortPlans(
+      plans.filter((p) => effectiveTimeframe(p, today) === timeframe),
+      today,
+    ),
   })).filter((g) => g.plans.length > 0);
 }

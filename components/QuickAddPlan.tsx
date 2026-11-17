@@ -22,6 +22,7 @@ import {
   STATUSES,
   TIMEFRAMES,
   VISIBILITIES,
+  effectiveTimeframe,
   type Category,
   type Plan,
   type PlanInput,
@@ -45,6 +46,8 @@ const EMPTY: PlanInput = {
   timeframe: "This Month",
   status: "Just an Idea",
   specific_dates: "",
+  start_date: "",
+  end_date: "",
   notes: "",
   visibility: "public",
 };
@@ -91,6 +94,8 @@ function PlanForm({
           timeframe: editing.timeframe,
           status: editing.status,
           specific_dates: editing.specific_dates ?? "",
+          start_date: editing.start_date ?? "",
+          end_date: editing.end_date ?? "",
           notes: editing.notes ?? "",
           visibility: editing.visibility ?? "public",
         }
@@ -98,6 +103,8 @@ function PlanForm({
   );
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Older plans used free-text dates; keep that field only for them.
+  const showLegacyDates = !!editing?.specific_dates && !editing.start_date;
 
   function set<K extends keyof PlanInput>(key: K, value: PlanInput[K]) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -109,6 +116,12 @@ function PlanForm({
       setError("Give your plan a title.");
       return;
     }
+    const start = form.start_date || null;
+    const end = start ? form.end_date || null : null;
+    if (end && start && end < start) {
+      setError("The end date is before the start date.");
+      return;
+    }
     setPending(true);
     setError(null);
 
@@ -117,7 +130,10 @@ function PlanForm({
       category: form.category,
       timeframe: form.timeframe,
       status: form.status,
-      specific_dates: form.specific_dates?.trim() || null,
+      start_date: start,
+      end_date: end === start ? null : end,
+      // Real dates replace the old free-text dates.
+      specific_dates: start ? null : form.specific_dates?.trim() || null,
       notes: form.notes?.trim() || null,
       visibility: form.visibility,
     };
@@ -207,36 +223,75 @@ function PlanForm({
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-[1fr_1.5fr]">
+      <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label htmlFor="plan-dates">
-            Dates <span className="font-normal text-muted-foreground">(optional)</span>
+          <Label htmlFor="plan-start">
+            Start <span className="font-normal text-muted-foreground">(optional)</span>
           </Label>
+          <Input
+            id="plan-start"
+            type="date"
+            value={form.start_date ?? ""}
+            onChange={(e) => {
+              const start = e.target.value;
+              setForm((f) => ({
+                ...f,
+                start_date: start,
+                end_date: f.end_date && start && f.end_date < start ? "" : f.end_date,
+                // Picking a date puts the plan in the matching bucket.
+                timeframe: start ? effectiveTimeframe({ ...f, start_date: start, created_at: "" }) : f.timeframe,
+              }));
+            }}
+            className="h-11 text-base"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="plan-end">
+            End <span className="font-normal text-muted-foreground">(optional)</span>
+          </Label>
+          <Input
+            id="plan-end"
+            type="date"
+            value={form.end_date ?? ""}
+            min={form.start_date || undefined}
+            disabled={!form.start_date}
+            onChange={(e) => set("end_date", e.target.value)}
+            className="h-11 text-base"
+          />
+        </div>
+        <p className="col-span-2 -mt-1.5 text-xs text-muted-foreground">
+          No dates yet? Leave these empty and the “When” bucket is used. Dated plans can be added to calendars.
+        </p>
+      </div>
+
+      {showLegacyDates && !form.start_date && (
+        <div className="space-y-1.5">
+          <Label htmlFor="plan-dates">Dates (text)</Label>
           <Input
             id="plan-dates"
             value={form.specific_dates ?? ""}
             onChange={(e) => set("specific_dates", e.target.value)}
-            placeholder="Oct 12–15"
             maxLength={40}
             className="h-11 text-base"
           />
         </div>
-        <div className="space-y-1.5">
-          <div className="flex items-baseline justify-between">
-            <Label htmlFor="plan-notes">
-              Note <span className="font-normal text-muted-foreground">(optional)</span>
-            </Label>
-            <span className="text-xs text-muted-foreground tabular-nums">{(form.notes ?? "").length}/140</span>
-          </div>
-          <Input
-            id="plan-notes"
-            value={form.notes ?? ""}
-            onChange={(e) => set("notes", e.target.value)}
-            placeholder="Need 2 more for the campsite"
-            maxLength={140}
-            className="h-11 text-base"
-          />
+      )}
+
+      <div className="space-y-1.5">
+        <div className="flex items-baseline justify-between">
+          <Label htmlFor="plan-notes">
+            Note <span className="font-normal text-muted-foreground">(optional)</span>
+          </Label>
+          <span className="text-xs text-muted-foreground tabular-nums">{(form.notes ?? "").length}/140</span>
         </div>
+        <Input
+          id="plan-notes"
+          value={form.notes ?? ""}
+          onChange={(e) => set("notes", e.target.value)}
+          placeholder="Need 2 more for the campsite"
+          maxLength={140}
+          className="h-11 text-base"
+        />
       </div>
 
       {error && (
