@@ -436,6 +436,7 @@ create table if not exists public.blocked_contacts (
 );
 
 alter table public.blocked_contacts enable row level security;
+revoke all on public.blocked_contacts from anon;
 grant select, insert, delete on public.blocked_contacts to authenticated;
 
 drop policy if exists "blocked_select_own" on public.blocked_contacts;

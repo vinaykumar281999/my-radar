@@ -7,7 +7,14 @@ A link-in-bio for your upcoming plans. Share `yourdomain.com/username` and frien
 ## Setup
 
 1. **Install:** `npm install`
-2. **Env:** `cp .env.example .env.local` and fill in `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` (Supabase → Project Settings → API).
+2. **Env:** `cp .env.example .env.local` and fill in:
+
+   | Variable | Where | Required |
+   | --- | --- | --- |
+   | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Project Settings → API | yes |
+   | `SUPABASE_SERVICE_ROLE_KEY` | Same page, the `service_role` / secret key. **Server-only: never prefix with `NEXT_PUBLIC_`.** | yes (interest, pitches, calendar feed) |
+   | `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Cloudflare → Turnstile → add a widget in **Invisible** mode | production (skipped in dev when unset; submissions are rejected in production without the secret) |
+   | `NEXT_PUBLIC_SITE_URL` | Your public URL | optional |
 3. **Database:** paste `supabase/schema.sql` into the Supabase SQL editor and run it. It is safe to re-run.
 4. **Auth redirects:** in Supabase → Authentication → URL Configuration:
    - Site URL: `http://localhost:3000` (your production domain later)
@@ -27,10 +34,15 @@ Magic link and email/password both work. If "Confirm email" is on in Supabase, p
 | `/dashboard` | Copy bio link, preview, story card, quick-add, status toggles, leads |
 | `/[username]` | Public bio page with the zero-login interest drawer |
 | `/[username]/opengraph-image` | Dynamic 1200×630 preview card (name + top 3 plans) |
+| `/[username]/p/[planId]` | Direct link to one plan (the only way to see an **unlisted** plan) |
+| `/settings` | Change username / name / bio, pause pitches, blocked senders, calendar feed |
+| `/api/ical/[token].ics` | Private iCal feed of your dated plans (secret token, regenerable) |
 
 ## Notes
 
-- `proxy.ts` (Next 16's replacement for `middleware.ts`) refreshes the Supabase session cookie and gates `/dashboard` and `/onboarding`.
+- `proxy.ts` (Next 16's replacement for `middleware.ts`) refreshes the Supabase session cookie, gates `/dashboard`, `/onboarding` and `/settings`, and 308-redirects old usernames to the current one (the page itself streams, so it can't send a real 308).
 - Cache Components is on, so anything that reads cookies or `params` sits behind a `<Suspense>` boundary with a skeleton fallback.
-- All writes go straight from the browser to Supabase. Row-level security is the authorization layer: anyone can submit interest in an active plan, and only the plan owner can read or delete those submissions.
+- Owner writes go straight from the browser to Supabase, with row-level security as the authorization layer.
+- Public submissions (“I'm Interested”, pitches) go through server actions in `lib/actions/submit.ts`: honeypot → Turnstile → per-IP limit (5 per 10 minutes, hashed IP) → insert with the service-role key. Anon INSERT on those tables is revoked, and database triggers enforce the per-person pitch cap, paused pitches and blocked senders.
+- `node --env-file=.env.local scripts/check-rls.mjs` runs read-only anon checks against your project.
 - Usernames that collide with app routes (`login`, `dashboard`, …) are rejected by both the database and the UI.

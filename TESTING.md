@@ -2,6 +2,8 @@
 
 Run `npm run dev` and open http://localhost:3000. Use two browsers or a private window for the guest steps.
 
+**Before testing:** `.env.local` has `SUPABASE_SERVICE_ROLE_KEY` (interest and pitches fail without it), `supabase/schema.sql` has been re-run, and `node --env-file=.env.local scripts/check-rls.mjs` prints "All checks passed".
+
 ## 1. Magic-link signup
 - [ ] `/login` → **Magic link** tab → enter a new email → "Check your inbox" appears
 - [ ] Open the email link → lands on `/auth/callback` → redirected to `/onboarding`
@@ -62,7 +64,7 @@ Run `npm run dev` and open http://localhost:3000. Use two browsers or a private 
 - [ ] Paste `https://<domain>/<username>` into WhatsApp / iMessage → preview card appears
 
 ## 10. Plan Chain
-Setup: re-run `supabase/schema.sql`, then `node --env-file=.env.local scripts/check-rls.mjs --pitch <your-username>` → all PASS (dismiss the "[RLS check]" pitch afterwards).
+Setup: see "Before testing" at the top.
 
 **Pitch from a private window**
 - [ ] Your public page → bottom card "Got an idea? Pitch a plan to <Name>" → drawer opens, no login
@@ -100,7 +102,72 @@ Setup: re-run `supabase/schema.sql`, then `node --env-file=.env.local scripts/ch
   const el = document.querySelector('input[name=website]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, 'spam'); el.dispatchEvent(new Event('input', { bubbles: true }));
   ```
   Submit → the success screen shows, but **no** pitch/lead appears in the dashboard
-- [ ] Rate cap: send 10 pitches to the same profile within an hour (private window) → the 11th shows "<Name> has a lot of pitches waiting right now. Try again in an hour!" Dismissing/accepting pending ones frees up the cap.
+- [ ] Per-person pitch cap (10 pending per hour): the per-IP limit (section 12) stops one network at 5, so this one can't be reached from a single browser. It was tested in the database; to see the message, send pitches from several networks (e.g. phone on cellular + Wi-Fi) until the 11th shows "<Name> has a lot of pitches waiting right now. Try again in an hour!"
+
+## 11. Settings + username change
+- [ ] Dashboard header → gear icon → `/settings`. Signed out, `/settings` → `/login?next=/settings`
+- [ ] Username field shows "This is your current username"; Save is disabled until something changes
+- [ ] Type `login` → "That one's reserved."; type another account's username → "Already taken"
+- [ ] Change display name / bio only → Save → toast "Profile saved", dashboard shows the new name
+- [ ] Change username `old` → `new` → hint says old links keep working → Save → toast "You're now @new"
+- [ ] `curl -sI http://localhost:3000/old` → `HTTP/1.1 308` with `location: /new` (allow up to a minute: redirects are cached briefly)
+- [ ] `/old/p/<plan-id>` → 308 to `/new/p/<plan-id>`
+- [ ] Second account: onboarding or settings with username `old` → "Already taken" (it stays reserved for you)
+- [ ] First account: change back to `old` → allowed; `/new` now 308s to `/old`
+- [ ] Onboarding (new account) still checks availability the same way
+
+## 12. Spam protection (server-side)
+- [ ] Interest and pitch still work end to end (private window) after adding `SUPABASE_SERVICE_ROLE_KEY`
+- [ ] Direct API insert is blocked: `node --env-file=.env.local scripts/check-rls.mjs` → "anon INSERT on … is revoked" PASS
+- [ ] Per-IP limit: from one browser send 5 interests/pitches (any mix) within 10 minutes → the 6th shows "You've sent a lot in the last few minutes. Try again in 10 minutes."
+- [ ] Honeypot still fakes success (section 10 console snippet) and nothing is saved
+- [ ] Turnstile with test keys in `.env.local`: `NEXT_PUBLIC_TURNSTILE_SITE_KEY=1x00000000000000000000AA`, `TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA` → restart dev → submissions work, Network tab shows a `challenges.cloudflare.com` request
+- [ ] Always-fail keys: site `2x00000000000000000000AB`, secret `2x0000000000000000000000000000000AA` → "We couldn't verify you're human…", nothing saved
+- [ ] Remove both keys → dev skips verification and submissions work
+- [ ] View page source / DevTools Sources: no `SUPABASE_SERVICE_ROLE_KEY` or `TURNSTILE_SECRET_KEY` value anywhere
+
+## 13. Owner controls
+**Pause pitches**
+- [ ] Settings → Pause pitches ON → public page no longer shows "Got an idea?"
+- [ ] A pitch drawer that was already open when you paused → Send → "<Name> isn't taking pitches right now."
+- [ ] Turn OFF → card is back, pitches work
+
+**Unlisted plans**
+- [ ] Edit a plan → Who can see it → Unlisted → Save → dashboard row shows a black "Unlisted" badge
+- [ ] Public page (private window) no longer lists it; story card skips it
+- [ ] Row → **Link** → toast "Private link copied…" → open it in a private window → the plan shows with I'm Interested working
+- [ ] Interest sent through the direct link appears in that plan's leads
+- [ ] `/<username>/p/<random-uuid>` → "This plan isn't available"; archived plan's link → same
+
+**Block a sender**
+- [ ] Pitches drawer → **Block** → button turns to "Tap to block" → tap → toast; all of that person's pending pitches disappear, and their interests vanish from every plan's count
+- [ ] Leads drawer → **Block** on a lead → same, the lead disappears
+- [ ] From the private window, send again as `@same.handle` (or `instagram.com/same.handle`, or different capitalization) → success screen shows, but nothing arrives
+- [ ] Settings → Blocked senders lists them → **Unblock** → their next pitch arrives normally
+- [ ] Known: `+1 555 123 4567` and `555 123 4567` are different senders (block the exact contact shown)
+
+**Search, bulk, CSV** (send yourself 3+ pitches and 3+ interests first)
+- [ ] Pitches drawer: type in search → list filters (title, name, handle, note); no match → "No pitches match"
+- [ ] Select all → "N selected" → **Dismiss N** → gone, Pitches badge drops, they don't return on reload
+- [ ] Select all only selects what's visible under the current search
+- [ ] **CSV** → `radar-pitches-YYYY-MM-DD.csv` opens in Sheets/Excel with correct columns and accented names
+- [ ] Leads drawer: same search; **Remove N** deletes them and the count badge updates; **CSV** → `radar-interested-….csv`
+- [ ] A contact like `=1+1` exports as text (`'=1+1`), not a formula; `@handles` and `+1 555…` export unchanged
+- [ ] Open leads for plan A, search/select, close, open plan B → search and selection are reset
+
+## 14. Calendar
+- [ ] New plan → Start date → the "When" pill jumps to the matching bucket (e.g. a Saturday this week → This Weekend)
+- [ ] End date is disabled until Start is set and can't be before it; save with End before Start is blocked
+- [ ] Dashboard row and public card show "Sat, Nov 21" (one day) or "Nov 21 – Nov 23" (range)
+- [ ] Public page: dated plans are sorted by date inside their section; undated plans follow, newest first
+- [ ] An older plan with free-text dates still shows them; editing it shows the "Dates (text)" field until you pick a start date
+- [ ] Public card → Add to calendar → **Google** opens a prefilled all-day event (end day correct, link to the plan in details)
+- [ ] **Apple / Outlook (.ics)** downloads a file; opening it adds the event (iPhone Safari shows the "Add to Calendar" sheet)
+- [ ] Undated plans show no Add to calendar row
+- [ ] Dashboard → **Month** → current month, today ringed, dots on dated days (multi-day plans on every day); tap a day → its plans list; tap a plan → edit dialog; arrows change month; undated count note at the bottom
+- [ ] Settings → Calendar feed → **Create my feed link** → `…/api/ical/<64 chars>.ics`; open it in a browser → `.ics` text with your dated plans, including unlisted, excluding archived
+- [ ] **Regenerate** → "Tap again…" → new link; the old one now returns 404
+- [ ] Google Calendar → Other calendars → + → From URL → paste the link → events appear. Needs a **public** URL (deployed site): Google can't reach localhost, and it refreshes subscribed calendars only every several hours
 
 ## Known limitation
 - Unknown usernames return HTTP **200** (the not-found page streams in after the shell is sent). Visitors see the right page; only bots see a 200.

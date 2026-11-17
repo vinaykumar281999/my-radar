@@ -1,8 +1,6 @@
-// Anon-key checks against the live Supabase project.
-//   node --env-file=.env.local scripts/check-rls.mjs              read-only checks
-//   node --env-file=.env.local scripts/check-rls.mjs --pitch <username>
-//     also inserts ONE test pitch for that profile (dismiss it in the dashboard),
-//     then confirms anon can't read, update, or delete it.
+// Anon-key checks against the live Supabase project. Read-only: every write it
+// attempts is expected to be rejected, so it never leaves data behind.
+//   node --env-file=.env.local scripts/check-rls.mjs
 import { createClient } from "@supabase/supabase-js";
 
 const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
@@ -15,42 +13,55 @@ function check(label, ok, detail) {
   if (!ok) failures++;
   console.log(`${ok ? "PASS" : "FAIL"}  ${label}${detail ? `  (${detail})` : ""}`);
 }
+const describe = (r) => (r.error ? `${r.error.code} ${r.error.message}` : `ok, ${r.data?.length ?? r.count ?? 0} rows`);
 const denied = (r) => r.error?.code === "42501";
+/** The privilege itself was revoked (not just an RLS row check that a real target could pass). */
+const revoked = (r) => denied(r) && /permission denied/i.test(r.error.message);
+/** Either no privilege at all, or RLS hides every row. */
+const unreadable = (r) => denied(r) || (!r.error && r.data.length === 0);
 
-// Schema present
-let r = await sb.from("plans").select("suggested_by_handle, chained_from_plan_id").limit(1);
-check("plans has Plan Chain columns", !r.error, r.error?.message);
-r = await sb.from("plan_pitches").select("id").limit(1);
-check("plan_pitches table exists", !r.error, r.error?.message);
+// --- Schema present -----------------------------------------------------------
+let r = await sb.from("plans").select("suggested_by_handle, chained_from_plan_id, visibility, start_date, end_date").limit(1);
+check("plans has Plan Chain, visibility and date columns", !r.error, r.error?.message);
+r = await sb.from("profiles").select("pitches_paused").limit(1);
+check("profiles has pitches_paused", !r.error, r.error?.message);
 
-// accept_pitch exists but is not callable by anon
-r = await sb.rpc("accept_pitch", { p_pitch_id: ZERO, p_suggested_by: "x" });
-check("accept_pitch exists, anon cannot execute", denied(r), r.error ? `${r.error.code} ${r.error.message}` : "call succeeded!");
-
-// Anon write rules
+// --- Public submissions only go through the server ------------------------------
 const pitch = { target_user_id: ZERO, title: "RLS check", category: "Trip", timeframe: "This Month", pitcher_name: "RLS check", pitcher_handle: "@rls_check" };
-check("anon pitch to nonexistent profile is rejected", denied(await sb.from("plan_pitches").insert(pitch)));
-check("anon pitch with status=accepted is rejected", denied(await sb.from("plan_pitches").insert({ ...pitch, status: "accepted" })));
-check("anon plan insert is rejected", denied(await sb.from("plans").insert({ user_id: ZERO, title: "x", category: "Trip", timeframe: "This Month" })));
+r = await sb.from("plan_pitches").insert(pitch);
+check("anon INSERT on plan_pitches is revoked", revoked(r), describe(r));
+r = await sb.from("interests").insert({ plan_id: ZERO, visitor_name: "RLS check", contact_handle: "@rls_check" });
+check("anon INSERT on interests is revoked", revoked(r), describe(r));
+r = await sb.from("plans").insert({ user_id: ZERO, title: "x", category: "Trip", timeframe: "This Month" });
+check("anon cannot insert plans", denied(r), describe(r));
 
-// Positive path (opt-in: writes one row)
-const i = process.argv.indexOf("--pitch");
-if (i > 0) {
-  const username = process.argv[i + 1];
-  const { data: profile } = await sb.from("profiles").select("id").eq("username", username).maybeSingle();
-  if (!profile) {
-    check(`profile @${username} exists`, false, "sign up and onboard first");
-  } else {
-    const ins = await sb.from("plan_pitches").insert({ ...pitch, target_user_id: profile.id, title: "[RLS check] safe to dismiss" });
-    check("anon can insert a pending pitch for a real profile", !ins.error, ins.error?.message);
-    const read = await sb.from("plan_pitches").select("id").eq("target_user_id", profile.id);
-    check("anon cannot read pitches", !read.error && read.data.length === 0, `${read.data?.length ?? "?"} rows visible`);
-    const upd = await sb.from("plan_pitches").update({ status: "dismissed" }, { count: "exact" }).eq("target_user_id", profile.id);
-    check("anon cannot update pitches", upd.count === 0, `${upd.count} rows updated`);
-    const del = await sb.from("plan_pitches").delete({ count: "exact" }).eq("target_user_id", profile.id);
-    check("anon cannot delete pitches", del.count === 0, `${del.count} rows deleted`);
-  }
+// --- Private tables stay private ------------------------------------------------
+for (const table of ["plan_pitches", "interests", "blocked_contacts", "calendar_feeds", "username_history", "rate_limit_hits"]) {
+  r = await sb.from(table).select("*").limit(5);
+  check(`anon cannot read ${table}`, unreadable(r), describe(r));
 }
+r = await sb.from("plans").select("id").eq("visibility", "unlisted").limit(5);
+check("anon cannot list unlisted plans", unreadable(r), describe(r));
+
+// --- Functions: signed-in / server only ----------------------------------------
+const rpcDenied = [
+  ["accept_pitch", { p_pitch_id: ZERO, p_suggested_by: "x" }],
+  ["block_contact", { p_contact: "@rls_check" }],
+  ["regenerate_calendar_token", {}],
+  ["consume_rate_limit", { p_bucket: "rls_check", p_limit: 1, p_window_seconds: 1 }],
+];
+for (const [fn, args] of rpcDenied) {
+  r = await sb.rpc(fn, args);
+  check(`${fn} exists, anon cannot execute`, denied(r), describe(r));
+}
+
+// --- Functions anon may call -------------------------------------------------------
+r = await sb.rpc("username_available", { p_username: "zz_rls_check_zz" });
+check("username_available works for anon", !r.error && r.data === true, describe(r));
+r = await sb.rpc("resolve_username", { p_username: "zz_rls_check_zz" });
+check("resolve_username works for anon (unknown name -> null)", !r.error && r.data === null, describe(r));
+r = await sb.rpc("get_public_plan", { p_plan_id: ZERO });
+check("get_public_plan works for anon (unknown id -> no rows)", !r.error && r.data.length === 0, describe(r));
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nAll checks passed");
 process.exit(failures ? 1 : 0);
