@@ -45,4 +45,5 @@ Magic link and email/password both work. If "Confirm email" is on in Supabase, p
 - Owner writes go straight from the browser to Supabase, with row-level security as the authorization layer.
 - Public submissions (“I'm Interested”, pitches) go through server actions in `lib/actions/submit.ts`: honeypot → Turnstile → per-IP limit (20 per 10 minutes, hashed IP) → insert with the service-role key. Anon INSERT on those tables is revoked, and database triggers enforce the per-person pitch cap, paused pitches and blocked senders.
 - `node --env-file=.env.local scripts/check-rls.mjs` runs read-only anon checks against your project.
+- `npm run test:db` runs `supabase/schema.sql` (fresh + re-run) and the SQL tests in `supabase/tests/` against a throwaway local Postgres, acting as anon, signed-in users and the service role. Needs PostgreSQL 15+ tools on PATH (`brew install postgresql@15`).
 - Usernames that collide with app routes (`login`, `dashboard`, …) are rejected by both the database and the UI.
