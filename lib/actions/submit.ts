@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { verifyTurnstile } from "@/lib/turnstile";
-import { CATEGORIES, TIMEFRAMES, type Category, type Timeframe } from "@/lib/types";
+import { PITCH_CATEGORIES, TIMEFRAMES, type Category, type Timeframe } from "@/lib/types";
 
 export type SubmitError =
   | "invalid"
@@ -15,6 +15,7 @@ export type SubmitError =
   | "pitches_paused"
   | "plan_unavailable"
   | "plan_full"
+  | "sign_in_required"
   | "server";
 
 export type SubmitResult = { ok: true } | { ok: false; error: SubmitError };
@@ -76,7 +77,7 @@ export async function submitPitch(input: PitchInput): Promise<SubmitResult> {
   const name = text(input.name, 60);
   const contact = text(input.contact, 60);
   const notes = text(input.notes, 140);
-  const category = (CATEGORIES as readonly string[]).includes(input.category) ? input.category : null;
+  const category = (PITCH_CATEGORIES as readonly string[]).includes(input.category) ? input.category : null;
   const timeframe = (TIMEFRAMES as readonly string[]).includes(input.timeframe) ? input.timeframe : null;
   if (!targetUserId || !title || !name || !contact || !category || !timeframe) return fail("invalid");
 
@@ -131,7 +132,7 @@ async function guarded(
   // A signed-in user already sent interest for this plan: nothing new to save.
   if (error.code === "23505" && error.message.includes("interests_plan_user_key")) return { ok: true };
 
-  for (const known of ["too_many_pitches", "pitches_paused", "plan_unavailable", "plan_full"] as const) {
+  for (const known of ["too_many_pitches", "pitches_paused", "plan_unavailable", "plan_full", "sign_in_required"] as const) {
     if (error.message.includes(known)) return fail(known);
   }
   // Foreign key: the plan or profile doesn't exist (any more).

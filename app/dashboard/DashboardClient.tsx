@@ -38,7 +38,7 @@ import { copyText } from "@/components/ShareButton";
 import { useOrigin } from "@/hooks/use-origin";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { formatDateRange } from "@/lib/dates";
+import { formatDateRange, formatDeparture } from "@/lib/dates";
 import { STATUSES, sortPlans, type BlockResult, type Circle, countLeads, type LeadCounts, type JoinNotice, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
 
 type DashboardClientProps = {
@@ -453,9 +453,11 @@ function ManagePlanRow({
           <p className="mt-1 leading-snug font-bold">{plan.title}</p>
           <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
             <CalendarDays className="size-3" />
-            {plan.start_date
-              ? formatDateRange(plan.start_date, plan.end_date)
-              : `${plan.timeframe}${plan.specific_dates ? ` · ${plan.specific_dates}` : ""}`}
+            {plan.category === "Carpool" && plan.departs_at && plan.departs_tz
+              ? `${plan.origin} → ${plan.destination} · ${formatDeparture(plan.departs_at, plan.departs_tz)}`
+              : plan.start_date
+                ? formatDateRange(plan.start_date, plan.end_date)
+                : `${plan.timeframe}${plan.specific_dates ? ` · ${plan.specific_dates}` : ""}`}
           </p>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {plan.visibility === "circles" && (

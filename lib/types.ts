@@ -6,7 +6,11 @@ export const CATEGORIES = [
   "Weekend",
   "Sports",
   "Food & Nightlife",
+  "Carpool",
 ] as const;
+
+/** Friends can pitch any category except a carpool (someone has to be driving). */
+export const PITCH_CATEGORIES = CATEGORIES.filter((c) => c !== "Carpool") as Exclude<Category, "Carpool">[];
 
 export const TIMEFRAMES = [
   "This Weekend",
@@ -47,6 +51,11 @@ export type Plan = {
   end_date: string | null;
   /** Optional number of spots; requests then need the owner's approval. */
   capacity: number | null;
+  /** Carpools: public route and departure (instant + the zone it was entered in). */
+  origin: string | null;
+  destination: string | null;
+  departs_at: string | null;
+  departs_tz: string | null;
   status: Status;
   notes: string | null;
   is_archived: boolean;
@@ -178,7 +187,19 @@ export type PlanInput = Pick<
   | "notes"
   | "visibility"
   | "capacity"
+  | "origin"
+  | "destination"
+  | "departs_at"
+  | "departs_tz"
 >;
+
+/** Carpool pickup spot and driver contact: owner + approved riders only (RLS). */
+export type PlanPrivateDetails = {
+  plan_id: string;
+  owner_id: string;
+  pickup_details: string | null;
+  owner_contact: string | null;
+};
 
 export const USERNAME_RE = /^[a-z0-9_]{3,30}$/;
 

@@ -53,7 +53,13 @@ export async function GET(request: Request, { params }: RouteContext<"/api/ical/
       title: `${CATEGORY_EMOJI[plan.category]} ${plan.title}`,
       start: plan.start_date!,
       end: plan.end_date,
-      description: [plan.notes, `Status: ${plan.status}`, plan.visibility === "unlisted" ? "Unlisted" : null]
+      startAt: plan.category === "Carpool" ? plan.departs_at : null,
+      description: [
+        plan.category === "Carpool" && plan.origin && plan.destination ? `${plan.origin} → ${plan.destination}` : null,
+        plan.notes,
+        `Status: ${plan.status}`,
+        plan.visibility === "unlisted" ? "Unlisted" : plan.visibility === "circles" ? "Circles only" : null,
+      ]
         .filter(Boolean)
         .join("\n"),
       url: `${base}/${profile.username}/p/${plan.id}`,

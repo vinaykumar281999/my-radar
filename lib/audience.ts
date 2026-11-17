@@ -20,9 +20,17 @@ export function storyPlans<T extends Pick<Plan, "is_archived" | "visibility">>(p
  * refuses too), since a copy would republish them on the copier's page.
  */
 export function canCopyPlan(
-  plan: { user_id?: string; visibility?: Plan["visibility"] },
+  plan: { user_id?: string; visibility?: Plan["visibility"]; category?: Plan["category"] },
   viewerId: string | null,
   { demo, hostUsername }: { demo?: boolean; hostUsername?: string },
 ) {
-  return !demo && !!viewerId && !!hostUsername && plan.visibility === "public" && viewerId !== plan.user_id;
+  return (
+    !demo &&
+    !!viewerId &&
+    !!hostUsername &&
+    plan.visibility === "public" &&
+    // Someone else's ride isn't yours to copy.
+    plan.category !== "Carpool" &&
+    viewerId !== plan.user_id
+  );
 }

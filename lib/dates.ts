@@ -39,3 +39,61 @@ export function daysInRange(start: string, end?: string | null, cap = 62) {
   for (let d = addDays(start, 1); d <= end && days.length < cap; d = addDays(d, 1)) days.push(d);
   return days;
 }
+
+// ---- Timed departures (carpools) -------------------------------------------
+// Stored as a UTC instant plus the IANA zone it was entered in, and always
+// shown in that zone: a 7:30 AM pickup in LA reads 7:30 AM PST for everyone,
+// on the server and in the browser alike.
+
+function zonedParts(ms: number, tz: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(new Date(ms));
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  return { y: get("year"), m: get("month"), d: get("day"), h: get("hour"), min: get("minute"), s: get("second") };
+}
+
+/** Offset of `tz` from UTC at instant `ms`, in ms. */
+function zoneOffset(ms: number, tz: string) {
+  const p = zonedParts(ms, tz);
+  return Date.UTC(p.y, p.m - 1, p.d, p.h, p.min, p.s) - Math.floor(ms / 1000) * 1000;
+}
+
+/** "2026-12-04T15:30" wall time in `tz` -> ISO UTC instant. */
+export function zonedInputToUtc(value: string, tz: string) {
+  const [date, time = "00:00"] = value.split("T");
+  const [y, m, d] = date.split("-").map(Number);
+  const [h, min] = time.split(":").map(Number);
+  const wall = Date.UTC(y, m - 1, d, h, min);
+  // Two passes settle the offset around daylight-saving changes.
+  let utc = wall - zoneOffset(wall, tz);
+  utc = wall - zoneOffset(utc, tz);
+  return new Date(utc).toISOString();
+}
+
+/** ISO UTC instant -> "2026-12-04T15:30" wall time in `tz` (for datetime-local inputs). */
+export function utcToZonedInput(iso: string, tz: string) {
+  const p = zonedParts(new Date(iso).getTime(), tz);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${p.y}-${pad(p.m)}-${pad(p.d)}T${pad(p.h)}:${pad(p.min)}`;
+}
+
+/** "Fri, Dec 4 · 3:30 PM PST" in the departure's own zone. */
+export function formatDeparture(iso: string, tz: string) {
+  const date = new Date(iso);
+  const day = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short", month: "short", day: "numeric" }).format(date);
+  const time = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(date);
+  return `${day} · ${time}`;
+}
+
+/** The browser's zone, e.g. "America/Los_Angeles". */
+export function localTimeZone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}

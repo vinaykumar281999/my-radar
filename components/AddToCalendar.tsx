@@ -10,6 +10,9 @@ import type { Plan } from "@/lib/types";
 type CalendarPlan = Pick<Plan, "id" | "title" | "category" | "notes" | "status"> & {
   start_date: string;
   end_date?: string | null;
+  origin?: string | null;
+  destination?: string | null;
+  departs_at?: string | null;
 };
 
 /** "Add to calendar: Google · .ics" for a dated plan. */
@@ -30,7 +33,15 @@ export function AddToCalendar({
     title: `${CATEGORY_EMOJI[plan.category]} ${plan.title}`,
     start: plan.start_date,
     end: plan.end_date,
-    description: [plan.notes, `On ${hostName}'s Radar (${plan.status})`].filter(Boolean).join("\n"),
+    // Carpools are timed (departure), everything else is all-day.
+    startAt: plan.category === "Carpool" ? plan.departs_at : null,
+    description: [
+      plan.category === "Carpool" && plan.origin && plan.destination ? `${plan.origin} → ${plan.destination}` : null,
+      plan.notes,
+      `On ${hostName}'s Radar (${plan.status})`,
+    ]
+      .filter(Boolean)
+      .join("\n"),
     url: origin && hostUsername ? `${origin}/${hostUsername}/p/${plan.id}` : null,
     confirmed: plan.status === "Locked In",
   };

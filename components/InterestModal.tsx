@@ -29,6 +29,8 @@ type InterestModalProps = {
   demo?: boolean;
   /** The plan has spots: this is a request the host approves. */
   spotRequest?: boolean;
+  /** "spot" or "seat" (carpools). */
+  seatWord?: string;
   onSent?: () => void;
 };
 
@@ -40,6 +42,7 @@ export function InterestModal({
   hostName,
   demo = false,
   spotRequest = false,
+  seatWord = "spot",
   onSent,
 }: InterestModalProps) {
   const [name, setName] = useState("");
@@ -109,7 +112,7 @@ export function InterestModal({
               <PartyPopper className="size-8 animate-in zoom-in-50 duration-500" />
             </div>
             <DrawerTitle className="text-xl font-bold">
-              {spotRequest ? `Requested! ${firstName} will confirm your spot.` : `Sent! ${firstName} knows you're down.`}
+              {spotRequest ? `Requested! ${firstName} will confirm your ${seatWord}.` : `Sent! ${firstName} knows you're down.`}
             </DrawerTitle>
             <DrawerDescription>
               They&apos;ll reach out on <span className="font-medium text-foreground">{contact}</span>{" "}
@@ -123,10 +126,13 @@ export function InterestModal({
           <form onSubmit={onSubmit} className="relative flex flex-col">
             <Honeypot value={trap} onChange={setTrap} />
             <DrawerHeader className="text-left">
-              <DrawerTitle className="text-lg font-bold">{spotRequest ? "Request a spot ✋" : "I'm interested 👋"}</DrawerTitle>
+              <DrawerTitle className="text-lg font-bold">
+                {spotRequest ? `Request a ${seatWord} ${seatWord === "seat" ? "🚗" : "✋"}` : "I'm interested 👋"}
+              </DrawerTitle>
               <DrawerDescription className="text-left">
-                {spotRequest ? "Ask" : "Let"} {firstName} {spotRequest ? "for a spot on" : "know you want in on"}{" "}
-                <span className="font-medium text-foreground">{planTitle}</span>. No account needed.
+                {spotRequest ? "Ask" : "Let"} {firstName} {spotRequest ? `for a ${seatWord} on` : "know you want in on"}{" "}
+                <span className="font-medium text-foreground">{planTitle}</span>.
+                {seatWord === "seat" ? " The pickup spot is shared once you're approved." : " No account needed."}
               </DrawerDescription>
             </DrawerHeader>
             <div className="space-y-4 p-4">

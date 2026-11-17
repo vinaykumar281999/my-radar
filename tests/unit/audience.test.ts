@@ -28,3 +28,8 @@ test("copy is offered only on public plans to a signed-in non-owner", () => {
   assert.equal(canCopyPlan(plan("public"), "viewer", { ...ctx, demo: true }), false, "demo");
   assert.equal(canCopyPlan({ user_id: "owner" }, "viewer", ctx), false, "visibility unknown");
 });
+
+test("copy is never offered on someone else's carpool", () => {
+  assert.equal(canCopyPlan({ ...plan("public"), category: "Carpool" }, "viewer", { hostUsername: "alice" }), false);
+  assert.equal(canCopyPlan({ ...plan("public"), category: "Trip" }, "viewer", { hostUsername: "alice" }), true);
+});

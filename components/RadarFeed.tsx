@@ -6,7 +6,7 @@ import { Lock } from "lucide-react";
 import { PlanCard } from "@/components/PlanCard";
 import { useViewer, useViewerStatus } from "@/components/ViewerContext";
 import { createClient } from "@/lib/supabase/client";
-import { groupByTimeframe, type InterestStatus, type Plan, type Spots } from "@/lib/types";
+import { groupByTimeframe, type Plan, type Spots } from "@/lib/types";
 
 export type SharedPlan = Plan & { shared_via: string[] };
 
@@ -30,7 +30,7 @@ export function RadarFeed({
   publicSpots: Record<string, Spots>;
 }) {
   const viewer = useViewer();
-  const { plans: shared, spots: sharedSpots, requests } = useViewerExtras(ownerId, viewer?.id ?? null, publicPlans);
+  const { plans: shared, spots: sharedSpots } = useViewerExtras(ownerId, viewer?.id ?? null);
   const spots = { ...publicSpots, ...sharedSpots };
   const sharedVia = new Map(shared.map((p) => [p.id, p.shared_via]));
   const groups = groupByTimeframe([...publicPlans, ...shared]);
@@ -67,7 +67,6 @@ export function RadarFeed({
                 hostUsername={hostUsername}
                 sharedVia={sharedVia.get(plan.id)}
                 spots={spots[plan.id]}
-                myRequest={requests[plan.id]}
               />
             ))}
           </div>
@@ -77,18 +76,16 @@ export function RadarFeed({
   );
 }
 
-type Extras = { plans: SharedPlan[]; spots: Record<string, Spots>; requests: Record<string, InterestStatus> };
-const NONE: Extras = { plans: [], spots: {}, requests: {} };
+type Extras = { plans: SharedPlan[]; spots: Record<string, Spots> };
+const NONE: Extras = { plans: [], spots: {} };
 
 /**
- * For a signed-in visitor (not the owner): plans shared with their circles,
- * spot counts for those, and their own requests on any of these plans.
- * All read with their session, so RLS decides what comes back.
+ * For a signed-in visitor (not the owner): plans shared with their circles and
+ * spot counts for those, read with their session so RLS decides.
  */
-function useViewerExtras(ownerId: string, viewerId: string | null, publicPlans: Plan[]): Extras {
+function useViewerExtras(ownerId: string, viewerId: string | null): Extras {
   const [loaded, setLoaded] = useState<{ key: string; extras: Extras } | null>(null);
   const key = `${ownerId}:${viewerId}`;
-  const publicIds = publicPlans.map((p) => p.id).join(",");
 
   useEffect(() => {
     if (!viewerId || viewerId === ownerId) return;
@@ -99,15 +96,9 @@ function useViewerExtras(ownerId: string, viewerId: string | null, publicPlans: 
       if (error) console.error("get_shared_plans", error);
       const plans = (data as SharedPlan[] | null) ?? [];
       const withSpots = plans.filter((p) => p.capacity != null).map((p) => p.id);
-      const allIds = [...(publicIds ? publicIds.split(",") : []), ...plans.map((p) => p.id)];
-      const [{ data: spotRows }, { data: mine }] = await Promise.all([
-        withSpots.length
-          ? supabase.rpc("plan_spots", { p_plan_ids: withSpots })
-          : Promise.resolve({ data: [] as { plan_id: string; capacity: number; taken: number }[] }),
-        allIds.length
-          ? supabase.from("interests").select("plan_id, status").in("plan_id", allIds).eq("user_id", viewerId)
-          : Promise.resolve({ data: [] as { plan_id: string; status: InterestStatus }[] }),
-      ]);
+      const { data: spotRows } = withSpots.length
+        ? await supabase.rpc("plan_spots", { p_plan_ids: withSpots })
+        : { data: [] };
       if (cancelled) return;
       setLoaded({
         key: `${ownerId}:${viewerId}`,
@@ -119,16 +110,13 @@ function useViewerExtras(ownerId: string, viewerId: string | null, publicPlans: 
               { capacity: r.capacity, taken: r.taken },
             ]),
           ),
-          requests: Object.fromEntries(
-            ((mine as { plan_id: string; status: InterestStatus }[] | null) ?? []).map((r) => [r.plan_id, r.status]),
-          ),
         },
       });
     })();
     return () => {
       cancelled = true;
     };
-  }, [ownerId, viewerId, publicIds]);
+  }, [ownerId, viewerId]);
 
   return loaded?.key === key ? loaded.extras : NONE;
 }

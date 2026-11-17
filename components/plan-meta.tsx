@@ -1,4 +1,4 @@
-import { Mountain, Music, Plane, Trophy, Wine, type LucideIcon } from "lucide-react";
+import { Car, Mountain, Music, Plane, Trophy, Wine, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Category, Status } from "@/lib/types";
 
@@ -8,6 +8,7 @@ export const CATEGORY_ICONS: Record<Category, LucideIcon> = {
   Weekend: Mountain,
   Sports: Trophy,
   "Food & Nightlife": Wine,
+  Carpool: Car,
 };
 
 export const CATEGORY_EMOJI: Record<Category, string> = {
@@ -16,6 +17,7 @@ export const CATEGORY_EMOJI: Record<Category, string> = {
   Weekend: "⛰️",
   Sports: "🏆",
   "Food & Nightlife": "🍸",
+  Carpool: "🚗",
 };
 
 export const STATUS_STYLES: Record<Status, { pill: string; dot: string; hex: string }> = {

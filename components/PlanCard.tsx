@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CalendarDays, Check, CopyPlus, Loader2, UsersRound } from "lucide-react";
 import { toast } from "sonner";
@@ -8,9 +9,10 @@ import { Button } from "@/components/ui/button";
 import { CategoryLabel, ChainPill, StatusPill } from "@/components/plan-meta";
 import { InterestModal } from "@/components/InterestModal";
 import { AddToCalendar } from "@/components/AddToCalendar";
-import { formatDateRange } from "@/lib/dates";
+import { formatDateRange, formatDeparture } from "@/lib/dates";
 import { canCopyPlan } from "@/lib/audience";
-import { useViewer } from "@/components/ViewerContext";
+import { useViewer, useViewerStatus } from "@/components/ViewerContext";
+import { CarpoolDetails } from "@/components/CarpoolDetails";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { InterestStatus, Plan, Spots } from "@/lib/types";
@@ -27,7 +29,17 @@ type PlanCardProps = {
     Partial<
       Pick<
         Plan,
-        "user_id" | "suggested_by_handle" | "chained_from_plan_id" | "start_date" | "end_date" | "visibility" | "capacity"
+        | "user_id"
+        | "suggested_by_handle"
+        | "chained_from_plan_id"
+        | "start_date"
+        | "end_date"
+        | "visibility"
+        | "capacity"
+        | "origin"
+        | "destination"
+        | "departs_at"
+        | "departs_tz"
       >
     >;
   hostName: string;
@@ -38,20 +50,22 @@ type PlanCardProps = {
   sharedVia?: string[];
   /** Plans with spots: how many are taken. */
   spots?: Spots;
-  /** The signed-in viewer's own request on this plan, if any. */
-  myRequest?: InterestStatus;
   className?: string;
 };
 
-export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots, myRequest, className }: PlanCardProps) {
+export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots, className }: PlanCardProps) {
   const [open, setOpen] = useState(false);
   // Set right after sending, so the card updates without a reload.
   const [sentStatus, setSentStatus] = useState<InterestStatus | null>(null);
   const viewer = useViewer();
   const canCopy = canCopyPlan(plan, viewer?.id ?? null, { demo, hostUsername });
   const hasSpots = plan.capacity != null;
+  const isCarpool = plan.category === "Carpool";
   const left = hasSpots && spots ? Math.max(0, spots.capacity - spots.taken) : null;
-  const request = myRequest ?? sentStatus;
+  const myRequest = useMyRequest(plan.id, hasSpots && !demo ? (viewer?.id ?? null) : null);
+  const request = sentStatus ?? myRequest;
+  const signedOut = useViewerStatus() === "signed_out";
+  const seatWord = isCarpool ? "seat" : "spot";
 
   return (
     <article className={cn("tap-card p-4", className)}>
@@ -69,7 +83,18 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
 
       <h3 className="mt-2 text-lg leading-snug font-bold tracking-tight text-balance">{plan.title}</h3>
 
-      {(plan.start_date || plan.specific_dates) && (
+      {isCarpool && plan.origin && plan.destination && (
+        <p className="mt-1 text-base font-semibold">
+          {plan.origin} <span className="text-muted-foreground">→</span> {plan.destination}
+        </p>
+      )}
+
+      {isCarpool && plan.departs_at && plan.departs_tz ? (
+        <p className="mt-1 inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+          <CalendarDays className="size-3.5" aria-hidden />
+          Leaves {formatDeparture(plan.departs_at, plan.departs_tz)}
+        </p>
+      ) : (plan.start_date || plan.specific_dates) && (
         <p className="mt-1 inline-flex items-center gap-1.5 text-sm text-muted-foreground">
           <CalendarDays className="size-3.5" aria-hidden />
           {plan.start_date ? formatDateRange(plan.start_date, plan.end_date) : plan.specific_dates}
@@ -80,7 +105,7 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
 
       {hasSpots && left !== null && (
         <p className={cn("mt-2 text-sm font-semibold", left === 0 ? "text-muted-foreground" : "text-foreground")}>
-          {left === 0 ? "Full" : `${left} of ${spots!.capacity} spots left`}
+          {left === 0 ? "Full" : `${left} of ${spots!.capacity} ${seatWord}s left`}
         </p>
       )}
 
@@ -97,19 +122,30 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
           <p className="flex h-11 flex-1 items-center justify-center rounded-xl bg-muted text-sm font-semibold">
             {REQUEST_LABEL[request]}
           </p>
+        ) : isCarpool && signedOut && !demo ? (
+          <Button
+            render={<Link href={`/login?next=${encodeURIComponent(hostUsername ? `/${hostUsername}/p/${plan.id}` : "/")}`} />}
+            nativeButton={false}
+            variant="outline"
+            className="h-11 flex-1 rounded-xl text-base font-semibold"
+          >
+            Sign in to request a seat
+          </Button>
         ) : (
           <Button
             onClick={() => setOpen(true)}
             disabled={hasSpots && left === 0}
             className="h-11 flex-1 rounded-xl text-base font-semibold"
           >
-            {hasSpots ? (left === 0 ? "Full" : "Request a spot ✋") : "I'm Interested 👋"}
+            {hasSpots ? (left === 0 ? "Full" : isCarpool ? "Request a seat 🚗" : "Request a spot ✋") : "I'm Interested 👋"}
           </Button>
         )}
         {canCopy && viewer && hostUsername && (
           <CopyToRadarButton plan={plan} viewerId={viewer.id} hostUsername={hostUsername} />
         )}
       </div>
+
+      {isCarpool && request === "approved" && <CarpoolDetails planId={plan.id} />}
 
       {plan.start_date && !demo && (
         <AddToCalendar
@@ -128,6 +164,7 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
         hostName={hostName}
         demo={demo}
         spotRequest={hasSpots}
+        seatWord={seatWord}
         onSent={() => viewer && setSentStatus(hasSpots ? "pending" : "interested")}
       />
     </article>
@@ -194,3 +231,27 @@ function CopyToRadarButton({
   );
 }
 
+/** The signed-in viewer's own request on a plan with spots (RLS: only their own row). */
+function useMyRequest(planId: string, viewerId: string | null) {
+  const [loaded, setLoaded] = useState<{ key: string; status: InterestStatus | null } | null>(null);
+  const key = `${planId}:${viewerId}`;
+
+  useEffect(() => {
+    if (!viewerId) return;
+    let cancelled = false;
+    createClient()
+      .from("interests")
+      .select("status")
+      .eq("plan_id", planId)
+      .eq("user_id", viewerId)
+      .maybeSingle<{ status: InterestStatus }>()
+      .then(({ data }) => {
+        if (!cancelled) setLoaded({ key: `${planId}:${viewerId}`, status: data?.status ?? null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [planId, viewerId]);
+
+  return loaded?.key === key ? loaded.status : null;
+}

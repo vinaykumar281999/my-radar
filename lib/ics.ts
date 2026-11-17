@@ -6,6 +6,9 @@ export type IcsEvent = {
   /** All-day, "YYYY-MM-DD", inclusive. */
   start: string;
   end?: string | null;
+  /** Timed event instead (carpool departure): ISO instant; lasts `durationMinutes` (default 60). */
+  startAt?: string | null;
+  durationMinutes?: number;
   description?: string | null;
   url?: string | null;
   confirmed?: boolean;
@@ -38,8 +41,22 @@ function fold(line: string) {
 
 const compact = (iso: string) => iso.replace(/-/g, "");
 
+/** ISO instant -> "20261204T233000Z". */
+function utcStamp(iso: string) {
+  return new Date(iso).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+}
+
 function stamp() {
-  return new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+  return utcStamp(new Date().toISOString());
+}
+
+/** [DTSTART, DTEND] values for an event (timed in UTC, or all-day with an exclusive end). */
+function eventRange(e: Pick<IcsEvent, "start" | "end" | "startAt" | "durationMinutes">): [string, string] {
+  if (e.startAt) {
+    const end = new Date(new Date(e.startAt).getTime() + (e.durationMinutes ?? 60) * 60_000).toISOString();
+    return [utcStamp(e.startAt), utcStamp(end)];
+  }
+  return [compact(e.start), compact(addDays(e.end ?? e.start, 1))];
 }
 
 export function buildCalendar(events: IcsEvent[], name = "Radar") {
@@ -61,9 +78,10 @@ export function buildCalendar(events: IcsEvent[], name = "Radar") {
       "BEGIN:VEVENT",
       `UID:${e.uid}`,
       `DTSTAMP:${dtstamp}`,
-      `DTSTART;VALUE=DATE:${compact(e.start)}`,
-      // DTEND is exclusive for all-day events.
-      `DTEND;VALUE=DATE:${compact(addDays(e.end ?? e.start, 1))}`,
+      ...(e.startAt
+        ? [`DTSTART:${eventRange(e)[0]}`, `DTEND:${eventRange(e)[1]}`]
+        : // DTEND is exclusive for all-day events.
+          [`DTSTART;VALUE=DATE:${eventRange(e)[0]}`, `DTEND;VALUE=DATE:${eventRange(e)[1]}`]),
       `SUMMARY:${escapeText(e.title)}`,
       `STATUS:${e.confirmed ? "CONFIRMED" : "TENTATIVE"}`,
       "TRANSP:TRANSPARENT",
@@ -76,13 +94,12 @@ export function buildCalendar(events: IcsEvent[], name = "Radar") {
   return lines.map(fold).join("\r\n") + "\r\n";
 }
 
-/** Google Calendar "add event" link for an all-day event. */
-export function googleCalendarUrl(e: Pick<IcsEvent, "title" | "start" | "end" | "description" | "url">) {
-  const params = new URLSearchParams({
-    action: "TEMPLATE",
-    text: e.title,
-    dates: `${compact(e.start)}/${compact(addDays(e.end ?? e.start, 1))}`,
-  });
+/** Google Calendar "add event" link (all-day, or timed for carpools). */
+export function googleCalendarUrl(
+  e: Pick<IcsEvent, "title" | "start" | "end" | "startAt" | "durationMinutes" | "description" | "url">,
+) {
+  const [from, to] = eventRange(e);
+  const params = new URLSearchParams({ action: "TEMPLATE", text: e.title, dates: `${from}/${to}` });
   const details = [e.description, e.url].filter(Boolean).join("\n\n");
   if (details) params.set("details", details);
   return `https://calendar.google.com/calendar/render?${params}`;

@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,7 +31,9 @@ import {
   type Timeframe,
   type Visibility,
   type Circle,
+  type PlanPrivateDetails,
 } from "@/lib/types";
+import { localTimeZone, utcToZonedInput, zonedInputToUtc } from "@/lib/dates";
 
 type QuickAddPlanProps = {
   open: boolean;
@@ -57,6 +59,10 @@ const EMPTY: PlanInput = {
   notes: "",
   visibility: "public",
   capacity: null,
+  origin: "",
+  destination: "",
+  departs_at: null,
+  departs_tz: null,
 };
 
 const VISIBILITY_LABELS: Record<Visibility, string> = { public: "Public", unlisted: "Unlisted", circles: "Circles" };
@@ -126,10 +132,22 @@ function PlanForm({
           notes: editing.notes ?? "",
           visibility: editing.visibility ?? "public",
           capacity: editing.capacity ?? null,
+          origin: editing.origin ?? "",
+          destination: editing.destination ?? "",
+          departs_at: editing.departs_at,
+          departs_tz: editing.departs_tz,
         }
       : EMPTY,
   );
   const [circleIds, setCircleIds] = useState<string[]>(initialCircleIds);
+  // Carpool departure, as typed: a wall time in `tz` (the zone it was first entered in).
+  const [tz] = useState(() => editing?.departs_tz ?? localTimeZone());
+  const [departure, setDeparture] = useState(() =>
+    editing?.departs_at && editing.departs_tz ? utcToZonedInput(editing.departs_at, editing.departs_tz) : "",
+  );
+  const [privateDetails, setPrivateDetails] = useState({ pickup: "", contact: "", loaded: !editing });
+  const [confirmPublic, setConfirmPublic] = useState(!!editing && editing.category === "Carpool" && editing.visibility === "public");
+  const isCarpool = form.category === "Carpool";
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Older plans used free-text dates; keep that field only for them.
@@ -139,14 +157,54 @@ function PlanForm({
     setForm((f) => ({ ...f, [key]: value }));
   }
 
+  // Editing a carpool: load its private pickup / contact (owner-only via RLS).
+  const editingId = editing?.category === "Carpool" ? editing.id : null;
+  useEffect(() => {
+    if (!editingId) return;
+    let cancelled = false;
+    createClient()
+      .from("plan_private_details")
+      .select("*")
+      .eq("plan_id", editingId)
+      .maybeSingle<PlanPrivateDetails>()
+      .then(({ data }) => {
+        if (!cancelled) {
+          setPrivateDetails({ pickup: data?.pickup_details ?? "", contact: data?.owner_contact ?? "", loaded: true });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [editingId]);
+
+  function setCategory(category: Category) {
+    setForm((f) => ({
+      ...f,
+      category,
+      // Safety default: a new carpool starts shared with circles only.
+      visibility: category === "Carpool" && !editing && f.visibility === "public" ? "circles" : f.visibility,
+    }));
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.title.trim()) {
       setError("Give your plan a title.");
       return;
     }
-    const start = form.start_date || null;
-    const end = start ? form.end_date || null : null;
+    if (isCarpool) {
+      if (!form.origin?.trim() || !form.destination?.trim() || !departure || !form.capacity) {
+        setError("A carpool needs From, To, the departure time and the number of seats.");
+        return;
+      }
+      if (form.visibility === "public" && !confirmPublic) {
+        setError("Tick the box to confirm posting this carpool publicly.");
+        return;
+      }
+    }
+    // A carpool is dated by its departure (in its own zone).
+    const start = isCarpool ? departure.slice(0, 10) : form.start_date || null;
+    const end = isCarpool ? null : start ? form.end_date || null : null;
     if (end && start && end < start) {
       setError("The end date is before the start date.");
       return;
@@ -171,6 +229,11 @@ function PlanForm({
       notes: form.notes?.trim() || null,
       visibility: form.visibility,
       capacity: form.capacity,
+      origin: isCarpool ? form.origin?.trim() || null : null,
+      destination: isCarpool ? form.destination?.trim() || null : null,
+      departs_at: isCarpool ? zonedInputToUtc(departure, tz) : null,
+      departs_tz: isCarpool ? tz : null,
+      ...(isCarpool && start ? { timeframe: effectiveTimeframe({ start_date: start, timeframe: form.timeframe, created_at: "" }) } : {}),
     };
 
     const supabase = createClient();
@@ -201,10 +264,32 @@ function PlanForm({
       p_visibility: form.visibility,
       p_circle_ids: sharedWith,
     });
-    setPending(false);
     if (audienceError) {
+      setPending(false);
       console.error("set_plan_audience", audienceError);
       setError("Saved, but couldn't update who can see it. Try saving again.");
+      return;
+    }
+
+    // Carpool pickup / contact live in their own owner-only table.
+    const pickup = privateDetails.pickup.trim();
+    const contact = privateDetails.contact.trim();
+    const details =
+      isCarpool && (pickup || contact)
+        ? await supabase.from("plan_private_details").upsert({
+            plan_id: data.id,
+            owner_id: userId,
+            pickup_details: pickup || null,
+            owner_contact: contact || null,
+            updated_at: new Date().toISOString(),
+          })
+        : editing
+          ? await supabase.from("plan_private_details").delete().eq("plan_id", data.id)
+          : { error: null };
+    setPending(false);
+    if (details.error) {
+      console.error("plan_private_details", details.error);
+      setError("Saved, but couldn't save the pickup details. Try saving again.");
       return;
     }
 
@@ -236,7 +321,7 @@ function PlanForm({
         label="Category"
         options={CATEGORIES}
         value={form.category}
-        onChange={(v) => set("category", v)}
+        onChange={setCategory}
         renderOption={(c) => {
           const Icon = CATEGORY_ICONS[c];
           return (
@@ -247,12 +332,32 @@ function PlanForm({
         }}
       />
 
-      <PillGroup<Timeframe>
-        label="When"
-        options={TIMEFRAMES}
-        value={form.timeframe}
-        onChange={(v) => set("timeframe", v)}
-      />
+      {isCarpool ? (
+        <CarpoolFields
+          origin={form.origin ?? ""}
+          destination={form.destination ?? ""}
+          departure={departure}
+          tz={tz}
+          seats={form.capacity}
+          pickup={privateDetails.pickup}
+          contact={privateDetails.contact}
+          detailsLoaded={privateDetails.loaded}
+          onChange={(change) => {
+            if ("origin" in change) set("origin", change.origin ?? "");
+            if ("destination" in change) set("destination", change.destination ?? "");
+            if ("seats" in change) set("capacity", change.seats ?? null);
+            if ("departure" in change) setDeparture(change.departure ?? "");
+            if ("pickup" in change || "contact" in change) setPrivateDetails((d) => ({ ...d, ...change }));
+          }}
+        />
+      ) : (
+        <PillGroup<Timeframe>
+          label="When"
+          options={TIMEFRAMES}
+          value={form.timeframe}
+          onChange={(v) => set("timeframe", v)}
+        />
+      )}
 
       <PillGroup<Status>
         label="Status"
@@ -275,6 +380,20 @@ function PlanForm({
           renderOption={(v) => VISIBILITY_LABELS[v]}
         />
         <p className="text-xs text-muted-foreground">{VISIBILITY_HINTS[form.visibility]}</p>
+        {isCarpool && form.visibility === "public" && (
+          <label className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm dark:border-amber-500/40 dark:bg-amber-500/10">
+            <input
+              type="checkbox"
+              checked={confirmPublic}
+              onChange={(e) => setConfirmPublic(e.target.checked)}
+              className="mt-0.5 size-4 accent-foreground"
+            />
+            <span>
+              Post this carpool publicly. Anyone can see the route and departure time (never the pickup spot or your
+              contact).
+            </span>
+          </label>
+        )}
         {form.visibility === "circles" &&
           (circles.length === 0 ? (
             <p className="rounded-lg bg-muted px-3 py-2 text-sm">
@@ -305,75 +424,79 @@ function PlanForm({
           ))}
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label htmlFor="plan-start">
-            Start <span className="font-normal text-muted-foreground">(optional)</span>
-          </Label>
-          <Input
-            id="plan-start"
-            type="date"
-            value={form.start_date ?? ""}
-            onChange={(e) => {
-              const start = e.target.value;
-              setForm((f) => ({
-                ...f,
-                start_date: start,
-                end_date: f.end_date && start && f.end_date < start ? "" : f.end_date,
-                // Picking a date puts the plan in the matching bucket.
-                timeframe: start ? effectiveTimeframe({ ...f, start_date: start, created_at: "" }) : f.timeframe,
-              }));
-            }}
-            className="h-11 text-base"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="plan-end">
-            End <span className="font-normal text-muted-foreground">(optional)</span>
-          </Label>
-          <Input
-            id="plan-end"
-            type="date"
-            value={form.end_date ?? ""}
-            min={form.start_date || undefined}
-            disabled={!form.start_date}
-            onChange={(e) => set("end_date", e.target.value)}
-            className="h-11 text-base"
-          />
-        </div>
-        <p className="col-span-2 -mt-1.5 text-xs text-muted-foreground">
-          No dates yet? Leave these empty and the “When” bucket is used. Dated plans can be added to calendars.
-        </p>
-      </div>
-
-      <div className="space-y-1.5">
-        <Label htmlFor="plan-capacity">
-          Spots <span className="font-normal text-muted-foreground">(optional)</span>
-        </Label>
-        <div className="flex items-center gap-3">
-          <Input
-            id="plan-capacity"
-            type="number"
-            inputMode="numeric"
-            min={1}
-            max={50}
-            value={form.capacity ?? ""}
-            onChange={(e) => {
-              const n = Number.parseInt(e.target.value, 10);
-              set("capacity", Number.isNaN(n) ? null : Math.min(50, Math.max(1, n)));
-            }}
-            placeholder="No limit"
-            className="h-11 w-28 text-base"
-          />
-          <p className="text-xs text-muted-foreground">
-            {form.capacity
-              ? `“I'm Interested” becomes “Request a spot”. You approve up to ${form.capacity}.`
-              : "Set a number to approve who gets a spot."}
+      {!isCarpool && (
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="plan-start">
+              Start <span className="font-normal text-muted-foreground">(optional)</span>
+            </Label>
+            <Input
+              id="plan-start"
+              type="date"
+              value={form.start_date ?? ""}
+              onChange={(e) => {
+                const start = e.target.value;
+                setForm((f) => ({
+                  ...f,
+                  start_date: start,
+                  end_date: f.end_date && start && f.end_date < start ? "" : f.end_date,
+                  // Picking a date puts the plan in the matching bucket.
+                  timeframe: start ? effectiveTimeframe({ ...f, start_date: start, created_at: "" }) : f.timeframe,
+                }));
+              }}
+              className="h-11 text-base"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="plan-end">
+              End <span className="font-normal text-muted-foreground">(optional)</span>
+            </Label>
+            <Input
+              id="plan-end"
+              type="date"
+              value={form.end_date ?? ""}
+              min={form.start_date || undefined}
+              disabled={!form.start_date}
+              onChange={(e) => set("end_date", e.target.value)}
+              className="h-11 text-base"
+            />
+          </div>
+          <p className="col-span-2 -mt-1.5 text-xs text-muted-foreground">
+            No dates yet? Leave these empty and the “When” bucket is used. Dated plans can be added to calendars.
           </p>
         </div>
-      </div>
+      )}
 
-      {showLegacyDates && !form.start_date && (
+      {!isCarpool && (
+        <div className="space-y-1.5">
+          <Label htmlFor="plan-capacity">
+            Spots <span className="font-normal text-muted-foreground">(optional)</span>
+          </Label>
+          <div className="flex items-center gap-3">
+            <Input
+              id="plan-capacity"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={50}
+              value={form.capacity ?? ""}
+              onChange={(e) => {
+                const n = Number.parseInt(e.target.value, 10);
+                set("capacity", Number.isNaN(n) ? null : Math.min(50, Math.max(1, n)));
+              }}
+              placeholder="No limit"
+              className="h-11 w-28 text-base"
+            />
+            <p className="text-xs text-muted-foreground">
+              {form.capacity
+                ? `“I'm Interested” becomes “Request a spot”. You approve up to ${form.capacity}.`
+                : "Set a number to approve who gets a spot."}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {showLegacyDates && !form.start_date && !isCarpool && (
         <div className="space-y-1.5">
           <Label htmlFor="plan-dates">Dates (text)</Label>
           <Input
@@ -413,5 +536,126 @@ function PlanForm({
         {pending ? <Loader2 className="animate-spin" /> : editing ? "Save changes" : "Post plan"}
       </Button>
     </form>
+  );
+}
+
+type CarpoolChange = Partial<{
+  origin: string;
+  destination: string;
+  departure: string;
+  seats: number | null;
+  pickup: string;
+  contact: string;
+}>;
+
+/** Route, departure and seats (public to whoever sees the plan) + pickup and contact (approved riders only). */
+function CarpoolFields({
+  origin,
+  destination,
+  departure,
+  tz,
+  seats,
+  pickup,
+  contact,
+  detailsLoaded,
+  onChange,
+}: {
+  origin: string;
+  destination: string;
+  departure: string;
+  tz: string;
+  seats: number | null;
+  pickup: string;
+  contact: string;
+  detailsLoaded: boolean;
+  onChange: (change: CarpoolChange) => void;
+}) {
+  return (
+    <div className="space-y-4 rounded-xl border p-3.5">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="carpool-from">From</Label>
+          <Input
+            id="carpool-from"
+            value={origin}
+            onChange={(e) => onChange({ origin: e.target.value })}
+            placeholder="SF Mission"
+            maxLength={60}
+            className="h-11 text-base"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="carpool-to">To</Label>
+          <Input
+            id="carpool-to"
+            value={destination}
+            onChange={(e) => onChange({ destination: e.target.value })}
+            placeholder="Tahoe"
+            maxLength={60}
+            className="h-11 text-base"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="carpool-departure">Departure</Label>
+          <Input
+            id="carpool-departure"
+            type="datetime-local"
+            value={departure}
+            onChange={(e) => onChange({ departure: e.target.value })}
+            className="h-11 text-base"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="carpool-seats">Seats</Label>
+          <Input
+            id="carpool-seats"
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={50}
+            value={seats ?? ""}
+            onChange={(e) => {
+              const n = Number.parseInt(e.target.value, 10);
+              onChange({ seats: Number.isNaN(n) ? null : Math.min(50, Math.max(1, n)) });
+            }}
+            placeholder="3"
+            className="h-11 text-base"
+          />
+        </div>
+        <p className="col-span-2 -mt-1.5 text-xs text-muted-foreground">
+          Time is in {tz.replace(/_/g, " ")}. Riders request a seat and you approve them.
+        </p>
+      </div>
+
+      <div className="space-y-3 border-t pt-3">
+        <p className="flex items-center gap-1.5 text-xs font-semibold">
+          <Lock className="size-3.5" /> Only approved riders see these
+        </p>
+        <div className="space-y-1.5">
+          <Label htmlFor="carpool-pickup">Exact pickup</Label>
+          <Input
+            id="carpool-pickup"
+            value={pickup}
+            onChange={(e) => onChange({ pickup: e.target.value })}
+            placeholder={detailsLoaded ? "24th St BART, north exit" : "Loading…"}
+            disabled={!detailsLoaded}
+            maxLength={280}
+            className="h-11 text-base"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="carpool-contact">Your contact</Label>
+          <Input
+            id="carpool-contact"
+            value={contact}
+            onChange={(e) => onChange({ contact: e.target.value })}
+            placeholder={detailsLoaded ? "@you or +1 555 123 4567" : "Loading…"}
+            disabled={!detailsLoaded}
+            maxLength={60}
+            className="h-11 text-base"
+          />
+        </div>
+      </div>
+    </div>
   );
 }

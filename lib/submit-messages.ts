@@ -11,6 +11,8 @@ export function submitErrorMessage(error: SubmitError, hostFirstName: string) {
       return `${hostFirstName} has a lot of pitches waiting right now. Try again in an hour!`;
     case "pitches_paused":
       return `${hostFirstName} isn't taking pitches right now.`;
+    case "sign_in_required":
+      return "Sign in to request a seat, so the driver knows who's riding.";
     case "plan_full":
       return "It just filled up! No spots left right now.";
     case "plan_unavailable":

@@ -18,7 +18,7 @@ import { CONTACT_HINT, Honeypot } from "@/components/Honeypot";
 import { useTurnstile } from "@/hooks/use-turnstile";
 import { submitPitch } from "@/lib/actions/submit";
 import { submitErrorMessage } from "@/lib/submit-messages";
-import { CATEGORIES, TIMEFRAMES, type Category, type Timeframe } from "@/lib/types";
+import { PITCH_CATEGORIES, TIMEFRAMES, type Category, type Timeframe } from "@/lib/types";
 
 /** Minimal "Got an idea?" card at the bottom of a public feed; opens the pitch drawer. */
 export function PitchPrompt({ targetUserId, hostName }: { targetUserId: string; hostName: string }) {
@@ -153,7 +153,7 @@ function PitchModal({
                   className="h-11 text-base"
                 />
               </div>
-              <PillGroup<Category> label="Category" options={CATEGORIES} value={category} onChange={setCategory} />
+              <PillGroup<Category> label="Category" options={PITCH_CATEGORIES} value={category} onChange={setCategory} />
               <PillGroup<Timeframe> label="When" options={TIMEFRAMES} value={timeframe} onChange={setTimeframe} />
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">

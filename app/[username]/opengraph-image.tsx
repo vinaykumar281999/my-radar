@@ -13,6 +13,7 @@ const EMOJI: Record<Category, string> = {
   Weekend: "⛰️",
   Sports: "🏆",
   "Food & Nightlife": "🍸",
+  Carpool: "🚗",
 };
 
 const STATUS_COLOR: Record<Status, { bg: string; fg: string }> = {
