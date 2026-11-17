@@ -4,6 +4,11 @@ Run `npm run dev` and open http://localhost:3000. Use two browsers or a private 
 
 **Before testing:** `.env.local` has `SUPABASE_SERVICE_ROLE_KEY` (interest and pitches fail without it), `supabase/schema.sql` has been re-run, and `node --env-file=.env.local scripts/check-rls.mjs` prints "All checks passed".
 
+**Automated checks** (run these first; the manual list below covers what they can't):
+- `npm run test:unit`: who-sees-what rules (story export, Copy to my Radar), dates, time zones, .ics, CSV
+- `npm run test:db`: `schema.sql` fresh + re-run, then RLS/trigger/function tests as anon, members, non-members, owners and the server, including a two-session overbooking test. Needs local Postgres (`brew install postgresql@15`)
+- `npm run test:leaks` with `npm run dev` running: creates 3 throwaway users in your project, byte-compares the signed-out profile page, OG image and a circle plan's link before/after adding private plans, checks copy, iCal, RPCs and interest submissions, then deletes the users
+
 ## 1. Magic-link signup
 - [ ] `/login` → **Magic link** tab → enter a new email → "Check your inbox" appears
 - [ ] Open the email link → lands on `/auth/callback` → redirected to `/onboarding`
@@ -88,7 +93,7 @@ Setup: see "Before testing" at the top.
 
 **Copy to my Radar (second account)**
 - [ ] Sign in as a second, onboarded account → open the first account's public page
-- [ ] Each plan card shows a small copy icon next to "I'm Interested" (not shown when signed out or on your own page)
+- [ ] Each **public** plan card shows a small copy icon next to "I'm Interested" (not shown when signed out, on your own page, on unlisted or circle plans, or on carpools)
 - [ ] Tap it → check icon + toast "Added to your Radar" → **View** → plan is in your dashboard as "Just an Idea" with "🔗 Chained with @<first-username>"
 
 **One-tap follow-up in the leads drawer**
@@ -168,6 +173,64 @@ Setup: see "Before testing" at the top.
 - [ ] Settings → Calendar feed → **Create my feed link** → `…/api/ical/<64 chars>.ics`; open it in a browser → `.ics` text with your dated plans, including unlisted, excluding archived
 - [ ] **Regenerate** → "Tap again…" → new link; the old one now returns 404
 - [ ] Google Calendar → Other calendars → + → From URL → paste the link → events appear. Needs a **public** URL (deployed site): Google can't reach localhost, and it refreshes subscribed calendars only every several hours
+
+## 15. Circles
+Use three accounts: **owner**, **member**, **outsider** (e.g. three browsers / private windows).
+
+**Managing circles (owner → Settings → Circles)**
+- [ ] Create "College" → card appears; creating "College" again → "You already have a circle with that name."
+- [ ] Add by username: member's username → chip appears; unknown name → "No one is @x"; your own → "That's you…"; same person twice → "already in"
+- [ ] **Create invite link** → copied, row shows `0/25 · 7d`; **Revoke** → row disappears
+- [ ] Delete a circle → "Tap again" → deleted; its plans now show "No circles — only you" on the dashboard
+
+**Invite links**
+- [ ] Signed out, open the link → "<Owner> invited you to “College”" → **Sign in to join** → (new account: onboarding) → lands back and joins automatically → "You're in College 🎉"
+- [ ] Signed in, open a link → one tap **Join College**; opening it again → "You're already in"
+- [ ] Owner opening their own link → "This is your circle"
+- [ ] Revoked / expired / garbage link → "This invite link doesn't work anymore" (no circle name shown)
+- [ ] Owner dashboard → "<name> joined College via invite link" notice → ✕ dismisses (stays gone on reload); with 2+ notices, **Dismiss all**
+- [ ] Settings → remove someone who joined via a still-working link → dialog "Also revoke that invite link" (shows how many others used it) → with the box ticked, the link disappears; unticked, it stays
+- [ ] Removing someone added by username (or whose link is already dead) → removed without the dialog
+- [ ] Member → Settings → "Circles you're in" → **Leave**
+
+**Audience**
+- [ ] New plan → Who can see it → **Circles** → pick College → Post. With no circle picked → "Pick at least one circle."; with no circles at all → "Create one in Settings"
+- [ ] Dashboard row shows a "College" badge; **Link** toast says only College members can open it
+- [ ] Edit → switch to Public → badge gone and the plan is on your public page; back to Circles → gone again
+
+**Who sees what** (the core of this feature)
+- [ ] Signed out: your page shows only public plans, plus "Sign in to see plans shared with you" (that line shows on every profile, even with nothing shared)
+- [ ] Outsider signed in: same as signed out (no prompt, no circle plans)
+- [ ] Member signed in: circle plans appear in the right date group with "Shared with you · College"
+- [ ] The circle plan's direct link: member → the plan; outsider and signed-out → "This plan isn't available", exactly like a made-up plan id; the link preview (paste in iMessage/WhatsApp) never shows its title
+- [ ] Story Card and the OG image (`/<you>/opengraph-image`) never include circle or unlisted plans
+- [ ] Member: no copy icon on circle plans. `npm run test:leaks` covers the API side
+- [ ] Member sends I'm Interested on a circle plan → arrives in your leads. Remove them from the circle → the plan disappears for them, and sending again fails like a missing plan
+- [ ] Dashboard → **View as…** → "Someone signed out" shows public plans only; picking the member shows public + College plans with the label; unlisted plans never appear
+
+## 16. Spots
+- [ ] Edit a plan → Spots: 2 → card shows "2 of 2 spots left" and **Request a spot ✋**
+- [ ] Private window: request a spot → "Requested! <Name> will confirm your spot."
+- [ ] Signed in as someone else: request → card switches to "Requested · waiting for an answer" (still there after reload)
+- [ ] Dashboard row shows `0/2` with "2 new"; open it → **Spot requests**, meter "0 of 2 spots taken · 2 waiting"
+- [ ] **Approve** both → meter 2 of 2; public card shows **Full** (button disabled); a third request (private window) → "It just filled up!"
+- [ ] Signed-in requester's card now says "You're in ✓"
+- [ ] **Take back spot** on one → frees it (card: "1 of 2 spots left"), requester sees "Not this time"
+- [ ] Delete an approved request, or **Block** that person → their spot frees up immediately
+- [ ] Try lowering Spots below the approved count → "More people are already approved than that…"
+- [ ] Two tabs, plan with 1 spot left, 2 waiting: approve a different request in each tab at the same time → one succeeds, the other says "No spots left" (the database test proves this under real concurrency)
+- [ ] CSV export from the requests drawer has a Status column
+
+## 17. Carpool
+- [ ] New plan → Category **Carpool** → "When"/dates/spots are replaced by From, To, Departure, Seats + "Only approved riders see these" (pickup, contact); Who can see it switches to **Circles**
+- [ ] Missing route/time/seats → "A carpool needs From, To…"; choosing Public shows a confirmation box that must be ticked
+- [ ] Card shows "SF → Tahoe", "Leaves Fri, Dec 4 · 3:30 PM PST" (the zone you entered it in, for everyone), "3 of 3 seats left", **Request a seat 🚗**
+- [ ] Signed out (public carpool): button is **Sign in to request a seat** → after sign-in, back on the plan
+- [ ] Rider requests → owner approves → rider's card shows "You're in ✓" plus the pickup spot and the driver contact (tappable). Pending or declined riders, other members and outsiders never see that block
+- [ ] Take back the rider's seat, or remove them from the circle → the pickup block disappears for them
+- [ ] Add to calendar → a timed event at the departure time (not all-day); same in the iCal feed
+- [ ] Edit the carpool → pickup/contact load into the form; switching it to another category removes them
+- [ ] Pitch form has no Carpool category; no copy icon on carpools
 
 ## Known limitation
 - Unknown usernames return HTTP **200** (the not-found page streams in after the shell is sent). Visitors see the right page; only bots see a 200.

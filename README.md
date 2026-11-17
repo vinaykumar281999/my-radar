@@ -35,7 +35,8 @@ Magic link and email/password both work. If "Confirm email" is on in Supabase, p
 | `/[username]` | Public bio page with the zero-login interest drawer |
 | `/[username]/opengraph-image` | Dynamic 1200×630 preview card (name + top 3 plans) |
 | `/[username]/p/[planId]` | Direct link to one plan (the only way to see an **unlisted** plan) |
-| `/settings` | Change username / name / bio, pause pitches, blocked senders, calendar feed |
+| `/settings` | Change username / name / bio, circles + invite links, pause pitches, blocked senders, calendar feed |
+| `/join/[token]` | Join a circle from an invite link (sign-in / sign-up first if needed) |
 | `/api/ical/[token].ics` | Private iCal feed of your dated plans (secret token, regenerable) |
 
 ## Notes
@@ -45,6 +46,9 @@ Magic link and email/password both work. If "Confirm email" is on in Supabase, p
 - Owner writes go straight from the browser to Supabase, with row-level security as the authorization layer.
 - Public submissions (“I'm Interested”, pitches) go through server actions in `lib/actions/submit.ts`: honeypot → Turnstile → per-IP limit (20 per 10 minutes, hashed IP) → insert with the service-role key. Anon INSERT on those tables is revoked, and database triggers enforce the per-person pitch cap, paused pitches and blocked senders.
 - `node --env-file=.env.local scripts/check-rls.mjs` runs read-only anon checks against your project.
+- **Who sees what.** Plans are Public, Unlisted (direct link only) or Circles (signed-in members of the chosen circles). The server only ever reads plans anonymously for public pages, metadata and OG images, so circle plans can't reach them; members' browsers load plans shared with them under RLS (`get_shared_plans`). Carpool pickup spots and driver contacts sit in `plan_private_details`, readable only by the owner and approved riders.
+- **Spots** are never stored: taken = approved requests. `approve_spot` locks the plan row before counting, so concurrent approvals can't overbook.
 - `npm run test:unit` runs the pure-logic tests in `tests/unit/` (who-sees-what rules, dates, .ics, CSV).
+- `npm run test:leaks` (with `npm run dev` running and `SUPABASE_SERVICE_ROLE_KEY` set) creates throwaway users in your project and checks circle/unlisted plans never leak, then deletes them.
 - `npm run test:db` runs `supabase/schema.sql` (fresh + re-run) and the SQL tests in `supabase/tests/` against a throwaway local Postgres, acting as anon, signed-in users and the service role. Needs PostgreSQL 15+ tools on PATH (`brew install postgresql@15`).
 - Usernames that collide with app routes (`login`, `dashboard`, …) are rejected by both the database and the UI.

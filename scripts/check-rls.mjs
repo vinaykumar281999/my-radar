@@ -21,8 +21,13 @@ const revoked = (r) => denied(r) && /permission denied/i.test(r.error.message);
 const unreadable = (r) => denied(r) || (!r.error && r.data.length === 0);
 
 // --- Schema present -----------------------------------------------------------
-let r = await sb.from("plans").select("suggested_by_handle, chained_from_plan_id, visibility, start_date, end_date").limit(1);
-check("plans has Plan Chain, visibility and date columns", !r.error, r.error?.message);
+let r = await sb
+  .from("plans")
+  .select("suggested_by_handle, chained_from_plan_id, visibility, start_date, end_date, capacity, origin, destination, departs_at, departs_tz")
+  .limit(1);
+check("plans has chain, visibility, date, spots and carpool columns", !r.error, r.error?.message);
+r = await sb.from("interests").select("status, user_id").limit(1);
+check("interests has status and user_id", denied(r) || !r.error, describe(r));
 r = await sb.from("profiles").select("pitches_paused").limit(1);
 check("profiles has pitches_paused", !r.error, r.error?.message);
 
@@ -36,12 +41,24 @@ r = await sb.from("plans").insert({ user_id: ZERO, title: "x", category: "Trip",
 check("anon cannot insert plans", denied(r), describe(r));
 
 // --- Private tables stay private ------------------------------------------------
-for (const table of ["plan_pitches", "interests", "blocked_contacts", "calendar_feeds", "username_history", "rate_limit_hits"]) {
+for (const table of [
+  "plan_pitches",
+  "interests",
+  "blocked_contacts",
+  "calendar_feeds",
+  "username_history",
+  "rate_limit_hits",
+  "circles",
+  "circle_members",
+  "circle_invites",
+  "plan_audiences",
+  "plan_private_details",
+]) {
   r = await sb.from(table).select("*").limit(5);
   check(`anon cannot read ${table}`, unreadable(r), describe(r));
 }
-r = await sb.from("plans").select("id").eq("visibility", "unlisted").limit(5);
-check("anon cannot list unlisted plans", unreadable(r), describe(r));
+r = await sb.from("plans").select("id").in("visibility", ["unlisted", "circles"]).limit(5);
+check("anon cannot list unlisted or circle plans", unreadable(r), describe(r));
 
 // --- Functions: signed-in / server only ----------------------------------------
 const rpcDenied = [
@@ -49,6 +66,14 @@ const rpcDenied = [
   ["block_contact", { p_contact: "@rls_check" }],
   ["regenerate_calendar_token", {}],
   ["consume_rate_limit", { p_bucket: "rls_check", p_limit: 1, p_window_seconds: 1 }],
+  ["can_user_see_plan", { p_plan_id: ZERO, p_user_id: ZERO }],
+  ["get_shared_plans", { p_owner_id: ZERO }],
+  ["get_shared_plan", { p_plan_id: ZERO }],
+  ["preview_visible_plans", { p_member_id: null }],
+  ["set_plan_audience", { p_plan_id: ZERO, p_visibility: "public", p_circle_ids: [] }],
+  ["redeem_circle_invite", { p_token: "rls_check" }],
+  ["approve_spot", { p_interest_id: ZERO }],
+  ["decline_spot", { p_interest_id: ZERO }],
 ];
 for (const [fn, args] of rpcDenied) {
   r = await sb.rpc(fn, args);
@@ -62,6 +87,10 @@ r = await sb.rpc("resolve_username", { p_username: "zz_rls_check_zz" });
 check("resolve_username works for anon (unknown name -> null)", !r.error && r.data === null, describe(r));
 r = await sb.rpc("get_public_plan", { p_plan_id: ZERO });
 check("get_public_plan works for anon (unknown id -> no rows)", !r.error && r.data.length === 0, describe(r));
+r = await sb.rpc("get_invite_preview", { p_token: "rls_check" });
+check("get_invite_preview reveals nothing for a bad token", !r.error && r.data?.status === "invalid", describe(r));
+r = await sb.rpc("plan_spots", { p_plan_ids: [ZERO] });
+check("plan_spots works for anon (unknown id -> no rows)", !r.error && r.data.length === 0, describe(r));
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nAll checks passed");
 process.exit(failures ? 1 : 0);
