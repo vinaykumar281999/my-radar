@@ -2,9 +2,9 @@ import "server-only";
 import { cache } from "react";
 import { createPublicClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
-import { USERNAME_RE, sortPlans, type Plan, type Profile } from "@/lib/types";
+import { USERNAME_RE, sortPlans, type Plan, type Profile, type Spots } from "@/lib/types";
 
-export type PublicRadar = { profile: Profile; plans: Plan[] };
+export type PublicRadar = { profile: Profile; plans: Plan[]; spots: Record<string, Spots> };
 
 /** Profile by username (case-insensitive). Deduped per request. */
 export const getPublicProfile = cache(async (rawUsername: string): Promise<Profile | null> => {
@@ -37,12 +37,12 @@ export const getPublicRadar = cache(async (rawUsername: string): Promise<PublicR
 
   if (plansError) logError("getPublicRadar plans", plansError);
 
-  return { profile, plans: sortPlans(plans ?? []) };
+  return { profile, plans: sortPlans(plans ?? []), spots: await getSpots(plans ?? []) };
 });
 
 /** Profile + one active plan (public or unlisted) for a direct plan link. */
 export const getPublicPlan = cache(
-  async (rawUsername: string, planId: string): Promise<{ profile: Profile; plan: Plan } | null> => {
+  async (rawUsername: string, planId: string): Promise<{ profile: Profile; plan: Plan; spots: Record<string, Spots> } | null> => {
     if (!UUID_RE.test(planId)) return null;
     const radar = await getPublicProfile(rawUsername);
     if (!radar) return null;
@@ -53,9 +53,23 @@ export const getPublicPlan = cache(
     if (error) logError("getPublicPlan", error);
     // The plan must belong to the user in the URL.
     if (!plan || plan.user_id !== radar.id) return null;
-    return { profile: radar, plan };
+    return { profile: radar, plan, spots: await getSpots([plan]) };
   },
 );
+
+/** Anonymous spot counts, so these can only ever cover public/unlisted plans. */
+async function getSpots(plans: Pick<Plan, "id" | "capacity">[]): Promise<Record<string, Spots>> {
+  const ids = plans.filter((p) => p.capacity != null).map((p) => p.id);
+  if (ids.length === 0) return {};
+  const { data, error } = await createPublicClient().rpc("plan_spots", { p_plan_ids: ids });
+  if (error) logError("plan_spots", error);
+  return Object.fromEntries(
+    ((data as { plan_id: string; capacity: number; taken: number }[] | null) ?? []).map((s) => [
+      s.plan_id,
+      { capacity: s.capacity, taken: s.taken },
+    ]),
+  );
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

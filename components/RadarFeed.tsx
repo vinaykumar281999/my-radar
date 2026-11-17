@@ -6,7 +6,7 @@ import { Lock } from "lucide-react";
 import { PlanCard } from "@/components/PlanCard";
 import { useViewer, useViewerStatus } from "@/components/ViewerContext";
 import { createClient } from "@/lib/supabase/client";
-import { groupByTimeframe, type Plan } from "@/lib/types";
+import { groupByTimeframe, type InterestStatus, type Plan, type Spots } from "@/lib/types";
 
 export type SharedPlan = Plan & { shared_via: string[] };
 
@@ -20,14 +20,18 @@ export function RadarFeed({
   hostName,
   hostUsername,
   publicPlans,
+  publicSpots,
 }: {
   ownerId: string;
   hostName: string;
   hostUsername: string;
   publicPlans: Plan[];
+  /** Spots for public plans, counted anonymously on the server. */
+  publicSpots: Record<string, Spots>;
 }) {
   const viewer = useViewer();
-  const shared = useSharedPlans(ownerId, viewer?.id ?? null);
+  const { plans: shared, spots: sharedSpots, requests } = useViewerExtras(ownerId, viewer?.id ?? null, publicPlans);
+  const spots = { ...publicSpots, ...sharedSpots };
   const sharedVia = new Map(shared.map((p) => [p.id, p.shared_via]));
   const groups = groupByTimeframe([...publicPlans, ...shared]);
 
@@ -62,6 +66,8 @@ export function RadarFeed({
                 hostName={hostName}
                 hostUsername={hostUsername}
                 sharedVia={sharedVia.get(plan.id)}
+                spots={spots[plan.id]}
+                myRequest={requests[plan.id]}
               />
             ))}
           </div>
@@ -71,26 +77,60 @@ export function RadarFeed({
   );
 }
 
-function useSharedPlans(ownerId: string, viewerId: string | null) {
-  const [loaded, setLoaded] = useState<{ key: string; plans: SharedPlan[] } | null>(null);
+type Extras = { plans: SharedPlan[]; spots: Record<string, Spots>; requests: Record<string, InterestStatus> };
+const NONE: Extras = { plans: [], spots: {}, requests: {} };
+
+/**
+ * For a signed-in visitor (not the owner): plans shared with their circles,
+ * spot counts for those, and their own requests on any of these plans.
+ * All read with their session, so RLS decides what comes back.
+ */
+function useViewerExtras(ownerId: string, viewerId: string | null, publicPlans: Plan[]): Extras {
+  const [loaded, setLoaded] = useState<{ key: string; extras: Extras } | null>(null);
   const key = `${ownerId}:${viewerId}`;
+  const publicIds = publicPlans.map((p) => p.id).join(",");
 
   useEffect(() => {
     if (!viewerId || viewerId === ownerId) return;
     let cancelled = false;
-    createClient()
-      .rpc("get_shared_plans", { p_owner_id: ownerId })
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        if (error) console.error("get_shared_plans", error);
-        setLoaded({ key: `${ownerId}:${viewerId}`, plans: (data as SharedPlan[] | null) ?? [] });
+    const supabase = createClient();
+    (async () => {
+      const { data, error } = await supabase.rpc("get_shared_plans", { p_owner_id: ownerId });
+      if (error) console.error("get_shared_plans", error);
+      const plans = (data as SharedPlan[] | null) ?? [];
+      const withSpots = plans.filter((p) => p.capacity != null).map((p) => p.id);
+      const allIds = [...(publicIds ? publicIds.split(",") : []), ...plans.map((p) => p.id)];
+      const [{ data: spotRows }, { data: mine }] = await Promise.all([
+        withSpots.length
+          ? supabase.rpc("plan_spots", { p_plan_ids: withSpots })
+          : Promise.resolve({ data: [] as { plan_id: string; capacity: number; taken: number }[] }),
+        allIds.length
+          ? supabase.from("interests").select("plan_id, status").in("plan_id", allIds).eq("user_id", viewerId)
+          : Promise.resolve({ data: [] as { plan_id: string; status: InterestStatus }[] }),
+      ]);
+      if (cancelled) return;
+      setLoaded({
+        key: `${ownerId}:${viewerId}`,
+        extras: {
+          plans,
+          spots: Object.fromEntries(
+            ((spotRows as { plan_id: string; capacity: number; taken: number }[] | null) ?? []).map((r) => [
+              r.plan_id,
+              { capacity: r.capacity, taken: r.taken },
+            ]),
+          ),
+          requests: Object.fromEntries(
+            ((mine as { plan_id: string; status: InterestStatus }[] | null) ?? []).map((r) => [r.plan_id, r.status]),
+          ),
+        },
       });
+    })();
     return () => {
       cancelled = true;
     };
-  }, [ownerId, viewerId]);
+  }, [ownerId, viewerId, publicIds]);
 
-  return loaded?.key === key ? loaded.plans : [];
+  return loaded?.key === key ? loaded.extras : NONE;
 }
 
 /**

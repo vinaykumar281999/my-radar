@@ -39,7 +39,7 @@ import { useOrigin } from "@/hooks/use-origin";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { formatDateRange } from "@/lib/dates";
-import { STATUSES, sortPlans, type BlockResult, type Circle, type JoinNotice, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
+import { STATUSES, sortPlans, type BlockResult, type Circle, countLeads, type LeadCounts, type JoinNotice, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
 
 type DashboardClientProps = {
   profile: Profile;
@@ -125,8 +125,12 @@ export function DashboardClient({
     setPlans((prev) => {
       const existing = prev.find((p) => p.id === saved.id);
       return existing
-        ? prev.map((p) => (p.id === saved.id ? { ...saved, interest_count: p.interest_count } : p))
-        : [{ ...saved, interest_count: 0 }, ...prev];
+        ? prev.map((p) =>
+            p.id === saved.id
+              ? { ...saved, interest_count: p.interest_count, approved_count: p.approved_count, pending_count: p.pending_count }
+              : p,
+          )
+        : [{ ...saved, interest_count: 0, approved_count: 0, pending_count: 0 }, ...prev];
     });
   }
 
@@ -154,21 +158,25 @@ export function DashboardClient({
     }
   }
 
-  const onCountChange = useCallback((planId: string, count: number) => {
-    setPlans((ps) => ps.map((p) => (p.id === planId && p.interest_count !== count ? { ...p, interest_count: count } : p)));
+  const onCountChange = useCallback((planId: string, counts: LeadCounts) => {
+    setPlans((ps) => ps.map((p) => (p.id === planId ? { ...p, ...counts } : p)));
   }, []);
 
   /** Blocking a sender clears their pitches and their interests on every plan. */
   function onBlocked({ pitch_ids, interests }: BlockResult) {
     setPitches((ps) => ps.filter((p) => !pitch_ids.includes(p.id)));
-    const removedPerPlan = new Map<string, number>();
-    interests.forEach((i) => removedPerPlan.set(i.plan_id, (removedPerPlan.get(i.plan_id) ?? 0) + 1));
     setPlans((ps) =>
-      ps.map((p) =>
-        removedPerPlan.has(p.id)
-          ? { ...p, interest_count: Math.max(0, p.interest_count - removedPerPlan.get(p.id)!) }
-          : p,
-      ),
+      ps.map((p) => {
+        const removed = interests.filter((i) => i.plan_id === p.id);
+        if (removed.length === 0) return p;
+        const by = countLeads(removed);
+        return {
+          ...p,
+          interest_count: Math.max(0, p.interest_count - by.interest_count),
+          approved_count: Math.max(0, p.approved_count - by.approved_count),
+          pending_count: Math.max(0, p.pending_count - by.pending_count),
+        };
+      }),
     );
   }
 
@@ -473,10 +481,25 @@ function ManagePlanRow({
               ? "bg-primary text-primary-foreground hover:bg-primary/85"
               : "bg-muted text-muted-foreground hover:bg-muted/70",
           )}
-          aria-label={`${plan.interest_count} interested — view`}
+          aria-label={
+            plan.capacity != null
+              ? `${plan.approved_count} of ${plan.capacity} spots taken, ${plan.pending_count} waiting — view requests`
+              : `${plan.interest_count} interested — view`
+          }
         >
           <Users className="size-4" />
-          <span className="tabular-nums">{plan.interest_count}</span>
+          {plan.capacity != null ? (
+            <span className="tabular-nums">
+              {plan.approved_count}/{plan.capacity}
+              {plan.pending_count > 0 && (
+                <span className="ml-1.5 rounded-full bg-amber-400 px-1.5 text-[11px] text-amber-950">
+                  {plan.pending_count} new
+                </span>
+              )}
+            </span>
+          ) : (
+            <span className="tabular-nums">{plan.interest_count}</span>
+          )}
         </button>
       </div>
 

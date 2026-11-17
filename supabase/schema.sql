@@ -616,7 +616,7 @@ create policy "blocked_delete_own" on public.blocked_contacts
 -- Block a sender and clear what they already sent: dismisses their pending
 -- pitches and deletes their interests on the caller's plans. SECURITY INVOKER,
 -- so RLS limits every statement to the caller's own rows.
--- Returns {"pitch_ids": [...], "interests": [{"id", "plan_id"}, ...]}.
+-- Returns {"pitch_ids": [...], "interests": [{"id", "plan_id", "status"}, ...]}.
 create or replace function public.block_contact(p_contact text)
 returns jsonb
 language plpgsql
@@ -655,9 +655,9 @@ begin
      where p.id = i.plan_id
        and p.user_id = auth.uid()
        and public.normalize_contact(i.contact_handle) = v_key
-    returning i.id, i.plan_id
+    returning i.id, i.plan_id, i.status
   )
-  select coalesce(jsonb_agg(jsonb_build_object('id', id, 'plan_id', plan_id)), '[]'::jsonb)
+  select coalesce(jsonb_agg(jsonb_build_object('id', id, 'plan_id', plan_id, 'status', status)), '[]'::jsonb)
     into v_interests from removed;
 
   return jsonb_build_object('pitch_ids', v_pitches, 'interests', v_interests);

@@ -8,7 +8,7 @@ import { PlanCard } from "@/components/PlanCard";
 import { SharedSignInPrompt, type SharedPlan } from "@/components/RadarFeed";
 import { useViewer, useViewerStatus } from "@/components/ViewerContext";
 import { createClient } from "@/lib/supabase/client";
-import type { Plan } from "@/lib/types";
+import type { Plan, Spots } from "@/lib/types";
 
 /**
  * The anonymous server read found no public/unlisted plan. If the visitor is a
@@ -29,7 +29,7 @@ export function SharedPlanFallback({
 }) {
   const status = useViewerStatus();
   const viewer = useViewer();
-  const [result, setResult] = useState<{ plan: SharedPlan | null; forViewer: string } | null>(null);
+  const [result, setResult] = useState<{ plan: SharedPlan | null; spots?: Spots; forViewer: string } | null>(null);
   const current = viewer && result?.forViewer === viewer.id ? result : null;
 
   useEffect(() => {
@@ -46,9 +46,16 @@ export function SharedPlanFallback({
       if (error) console.error("get_shared_plan", error);
       return (data as SharedPlan | null) ?? null;
     };
-    load().then((plan) => {
+    load().then(async (loadedPlan) => {
       // The plan must belong to the user in the URL.
-      if (!cancelled) setResult({ plan: plan && plan.user_id === ownerId ? plan : null, forViewer: viewer.id });
+      const plan = loadedPlan && loadedPlan.user_id === ownerId ? loadedPlan : null;
+      let spots: Spots | undefined;
+      if (plan?.capacity != null) {
+        const { data } = await supabase.rpc("plan_spots", { p_plan_ids: [plan.id] });
+        const row = (data as { capacity: number; taken: number }[] | null)?.[0];
+        if (row) spots = { capacity: row.capacity, taken: row.taken };
+      }
+      if (!cancelled) setResult({ plan, spots, forViewer: viewer.id });
     });
     return () => {
       cancelled = true;
@@ -66,6 +73,7 @@ export function SharedPlanFallback({
         hostName={hostName}
         hostUsername={hostUsername}
         sharedVia={viewer?.id === ownerId ? undefined : current.plan.shared_via}
+        spots={current.spots}
         className="mt-5"
       />
     );

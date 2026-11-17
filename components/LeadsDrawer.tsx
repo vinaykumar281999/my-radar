@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Copy, MessageCircle, Trash2, Users } from "lucide-react";
+import { Check, Copy, Loader2, MessageCircle, Trash2, Undo2, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,12 +18,13 @@ import { BlockButton, BulkToolbar, matchesQuery, toggleAll } from "@/components/
 import { parseContact } from "@/lib/contact";
 import { csvFilename, downloadCsv, toCsv } from "@/lib/csv";
 import { createClient } from "@/lib/supabase/client";
-import type { BlockResult, Interest, Plan } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import { countLeads, type BlockResult, type Interest, type InterestStatus, type LeadCounts, type Plan } from "@/lib/types";
 
 type LeadsDrawerProps = {
   plan: Plan | null;
   onOpenChange: (open: boolean) => void;
-  onCountChange: (planId: string, count: number) => void;
+  onCountChange: (planId: string, counts: LeadCounts) => void;
   /** A sender was blocked: their pitches/interests everywhere were cleared. */
   onBlocked: (result: BlockResult) => void;
 };
@@ -41,11 +42,23 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [bulkPending, setBulkPending] = useState(false);
 
-  const visible = (leads ?? []).filter((l) => matchesQuery(query, [l.visitor_name, l.contact_handle, l.message]));
+  const hasSpots = plan?.capacity != null;
+  // Requests waiting for a decision first, then approved, then the rest.
+  const visible = (leads ?? [])
+    .filter((l) => matchesQuery(query, [l.visitor_name, l.contact_handle, l.message]))
+    .sort((a, b) => (hasSpots ? STATUS_ORDER[a.status] - STATUS_ORDER[b.status] : 0));
   const selectedVisible = visible.filter((l) => selected.has(l.id));
+  const counts = countLeads(leads ?? []);
 
+  /** Update the list and tell the dashboard the new totals. */
   function setLeads(next: Interest[] | null) {
-    if (planId) setLoaded({ planId, leads: next, error: null });
+    if (!planId) return;
+    setLoaded({ planId, leads: next, error: null });
+    if (next) onCountChange(planId, countLeads(next));
+  }
+
+  function setStatus(id: string, status: InterestStatus) {
+    setLeads((leads ?? []).map((l) => (l.id === id ? { ...l, status } : l)));
   }
 
   useEffect(() => {
@@ -62,7 +75,7 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
         if (error) setLoaded({ planId, leads: null, error: error.message });
         else {
           setLoaded({ planId, leads: data ?? [], error: null });
-          onCountChange(planId, data?.length ?? 0);
+          onCountChange(planId, countLeads(data ?? []));
         }
       });
     return () => {
@@ -81,7 +94,6 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
       toast.error(ids.length === 1 ? "Couldn't remove that one." : "Couldn't remove those.");
       return false;
     }
-    onCountChange(planId, next.length);
     return true;
   }
 
@@ -113,10 +125,10 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
 
   function exportCsv() {
     const csv = toCsv(
-      ["Received", "Name", "Contact", "Note", "Plan"],
-      visible.map((l) => [l.created_at, l.visitor_name, l.contact_handle, l.message, plan?.title]),
+      ["Received", "Name", "Contact", "Note", "Plan", "Status"],
+      visible.map((l) => [l.created_at, l.visitor_name, l.contact_handle, l.message, plan?.title, l.status]),
     );
-    downloadCsv(csvFilename("interested"), csv);
+    downloadCsv(csvFilename(hasSpots ? "requests" : "interested"), csv);
   }
 
   return (
@@ -124,9 +136,12 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
       <DrawerContent className="mx-auto max-w-[560px]">
         <DrawerHeader className="text-left">
           <DrawerTitle className="flex items-center gap-2 text-lg font-bold">
-            <Users className="size-5 text-primary" /> Interested friends
+            <Users className="size-5 text-primary" /> {hasSpots ? "Spot requests" : "Interested friends"}
           </DrawerTitle>
           <DrawerDescription className="text-left">{plan?.title}</DrawerDescription>
+          {hasSpots && plan?.capacity != null && leads && (
+            <SpotsMeter capacity={plan.capacity} taken={counts.approved_count} waiting={counts.pending_count} />
+          )}
         </DrawerHeader>
 
         {leads && leads.length > 0 && (
@@ -170,6 +185,7 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
                   onToggle={() => toggle(lead.id)}
                   onRemove={() => removeLeads([lead.id])}
                   onBlocked={handleBlocked}
+                  onStatus={hasSpots ? (status) => setStatus(lead.id, status) : undefined}
                 />
               ))}
             </ul>
@@ -186,12 +202,15 @@ function LeadRow({
   onToggle,
   onRemove,
   onBlocked,
+  onStatus,
 }: {
   lead: Interest;
   selected: boolean;
   onToggle: () => void;
   onRemove: () => void;
   onBlocked: (result: BlockResult) => void;
+  /** Plans with spots: approve / decline this request. */
+  onStatus?: (status: InterestStatus) => void;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -216,7 +235,10 @@ function LeadRow({
         />
         <div className="min-w-0 flex-1">
           <p className="font-semibold">{lead.visitor_name}</p>
-          <p className="text-xs text-muted-foreground">{timeAgo(lead.created_at)}</p>
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            {timeAgo(lead.created_at)}
+            {onStatus && <RequestStatusPill status={lead.status} />}
+          </p>
         </div>
         <BlockButton contact={lead.contact_handle} onBlocked={onBlocked} />
         <Button variant="ghost" size="icon-sm" onClick={onRemove} aria-label={`Remove ${lead.visitor_name}`}>
@@ -246,7 +268,96 @@ function LeadRow({
           {lead.message}
         </p>
       )}
+      {onStatus && <RequestActions lead={lead} onStatus={onStatus} />}
     </li>
+  );
+}
+
+const STATUS_ORDER: Record<InterestStatus, number> = { pending: 0, approved: 1, interested: 2, declined: 3 };
+
+function SpotsMeter({ capacity, taken, waiting }: { capacity: number; taken: number; waiting: number }) {
+  return (
+    <div className="mt-2">
+      <div className="flex justify-between text-xs font-medium">
+        <span>
+          {taken} of {capacity} spots taken
+        </span>
+        <span className="text-muted-foreground">{waiting} waiting</span>
+      </div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted" role="presentation">
+        <div className="h-full rounded-full bg-foreground transition-all" style={{ width: `${Math.min(100, (taken / capacity) * 100)}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function RequestStatusPill({ status }: { status: InterestStatus }) {
+  const label = { pending: "Waiting", approved: "Approved", declined: "Declined", interested: "Interested" }[status];
+  return (
+    <span
+      className={cn(
+        "rounded-full px-1.5 py-px text-[10px] font-bold tracking-wide uppercase",
+        status === "approved" && "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300",
+        status === "pending" && "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300",
+        (status === "declined" || status === "interested") && "bg-muted text-muted-foreground",
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+/** Approve / decline a spot request. Approval is race-safe in the database (approve_spot). */
+function RequestActions({ lead, onStatus }: { lead: Interest; onStatus: (status: InterestStatus) => void }) {
+  const [pending, setPending] = useState<"approve" | "decline" | null>(null);
+
+  async function approve() {
+    setPending("approve");
+    const { error } = await createClient().rpc("approve_spot", { p_interest_id: lead.id });
+    setPending(null);
+    if (error) {
+      toast.error(
+        error.message.includes("plan_full")
+          ? "No spots left. Decline someone or add more spots."
+          : "Couldn't approve that request.",
+      );
+      return;
+    }
+    onStatus("approved");
+  }
+
+  async function decline() {
+    setPending("decline");
+    const { error } = await createClient().rpc("decline_spot", { p_interest_id: lead.id });
+    setPending(null);
+    if (error) {
+      toast.error("Couldn't update that request.");
+      return;
+    }
+    onStatus("declined");
+  }
+
+  if (lead.status === "approved") {
+    return (
+      <div className="mt-3 flex justify-end">
+        <Button size="sm" variant="ghost" onClick={decline} disabled={!!pending} className="text-muted-foreground">
+          {pending ? <Loader2 className="animate-spin" /> : <Undo2 />} Take back spot
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 flex gap-2">
+      <Button onClick={approve} disabled={!!pending} className="h-9 flex-1 rounded-lg font-semibold">
+        {pending === "approve" ? <Loader2 className="animate-spin" /> : <Check />} Approve
+      </Button>
+      {lead.status !== "declined" && (
+        <Button variant="outline" onClick={decline} disabled={!!pending} className="h-9 rounded-lg">
+          {pending === "decline" ? <Loader2 className="animate-spin" /> : <X />} Decline
+        </Button>
+      )}
+    </div>
   );
 }
 

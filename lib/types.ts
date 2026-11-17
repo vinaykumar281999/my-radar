@@ -45,6 +45,8 @@ export type Plan = {
   /** All-day "YYYY-MM-DD", optional; end_date is inclusive. */
   start_date: string | null;
   end_date: string | null;
+  /** Optional number of spots; requests then need the owner's approval. */
+  capacity: number | null;
   status: Status;
   notes: string | null;
   is_archived: boolean;
@@ -59,7 +61,28 @@ export type Plan = {
   created_at: string;
 };
 
-export type PlanWithCount = Plan & { interest_count: number };
+export type PlanWithCount = Plan & {
+  interest_count: number;
+  /** Plans with spots: approved / waiting for a decision. */
+  approved_count: number;
+  pending_count: number;
+};
+
+/** Totals the dashboard shows for a plan's interests / requests. */
+export type LeadCounts = { interest_count: number; approved_count: number; pending_count: number };
+
+export function countLeads(leads: Pick<Interest, "status">[]): LeadCounts {
+  return {
+    interest_count: leads.length,
+    approved_count: leads.filter((l) => l.status === "approved").length,
+    pending_count: leads.filter((l) => l.status === "pending").length,
+  };
+}
+
+/** Spots for a plan with capacity; taken = approved requests. */
+export type Spots = { capacity: number; taken: number };
+
+export type InterestStatus = "interested" | "pending" | "approved" | "declined";
 
 export type Interest = {
   id: string;
@@ -67,6 +90,8 @@ export type Interest = {
   visitor_name: string;
   contact_handle: string;
   message: string | null;
+  status: InterestStatus;
+  user_id: string | null;
   created_at: string;
 };
 
@@ -138,7 +163,7 @@ export type BlockedContact = {
 /** What block_contact() cleared: dismissed pitches and deleted interests. */
 export type BlockResult = {
   pitch_ids: string[];
-  interests: { id: string; plan_id: string }[];
+  interests: { id: string; plan_id: string; status: InterestStatus }[];
 };
 
 export type PlanInput = Pick<
@@ -152,6 +177,7 @@ export type PlanInput = Pick<
   | "status"
   | "notes"
   | "visibility"
+  | "capacity"
 >;
 
 export const USERNAME_RE = /^[a-z0-9_]{3,30}$/;

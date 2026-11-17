@@ -14,6 +14,7 @@ export type SubmitError =
   | "too_many_pitches"
   | "pitches_paused"
   | "plan_unavailable"
+  | "plan_full"
   | "server";
 
 export type SubmitResult = { ok: true } | { ok: false; error: SubmitError };
@@ -130,7 +131,7 @@ async function guarded(
   // A signed-in user already sent interest for this plan: nothing new to save.
   if (error.code === "23505" && error.message.includes("interests_plan_user_key")) return { ok: true };
 
-  for (const known of ["too_many_pitches", "pitches_paused", "plan_unavailable"] as const) {
+  for (const known of ["too_many_pitches", "pitches_paused", "plan_unavailable", "plan_full"] as const) {
     if (error.message.includes(known)) return fail(known);
   }
   // Foreign key: the plan or profile doesn't exist (any more).

@@ -67,12 +67,18 @@ async function PlanContent({ params }: { params: PageProps<"/[username]/p/[planI
     );
   }
 
-  const { profile, plan } = found;
+  const { profile, plan, spots } = found;
 
   return (
     <ViewerProvider>
       <ProfileLink username={profile.username} displayName={profile.display_name} avatarUrl={profile.avatar_url} />
-      <PlanCard plan={plan} hostName={profile.display_name} hostUsername={profile.username} className="mt-5" />
+      <PlanCard
+        plan={plan}
+        hostName={profile.display_name}
+        hostUsername={profile.username}
+        spots={spots[plan.id]}
+        className="mt-5"
+      />
       <Link
         href={`/${profile.username}`}
         className="mt-4 inline-flex items-center gap-1 self-center text-sm font-medium text-muted-foreground hover:text-foreground"

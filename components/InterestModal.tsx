@@ -27,6 +27,9 @@ type InterestModalProps = {
   hostName: string;
   /** Demo mode (landing page preview): skip the network call. */
   demo?: boolean;
+  /** The plan has spots: this is a request the host approves. */
+  spotRequest?: boolean;
+  onSent?: () => void;
 };
 
 export function InterestModal({
@@ -36,6 +39,8 @@ export function InterestModal({
   planTitle,
   hostName,
   demo = false,
+  spotRequest = false,
+  onSent,
 }: InterestModalProps) {
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
@@ -86,6 +91,7 @@ export function InterestModal({
         }
       }
       setSent(true);
+      onSent?.();
     } catch (err) {
       console.error(err);
       setError("Couldn't send that — please try again.");
@@ -102,7 +108,9 @@ export function InterestModal({
             <div className="grid size-16 place-items-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300">
               <PartyPopper className="size-8 animate-in zoom-in-50 duration-500" />
             </div>
-            <DrawerTitle className="text-xl font-bold">Sent! {firstName} knows you&apos;re down.</DrawerTitle>
+            <DrawerTitle className="text-xl font-bold">
+              {spotRequest ? `Requested! ${firstName} will confirm your spot.` : `Sent! ${firstName} knows you're down.`}
+            </DrawerTitle>
             <DrawerDescription>
               They&apos;ll reach out on <span className="font-medium text-foreground">{contact}</span>{" "}
               before booking <span className="font-medium text-foreground">{planTitle}</span>.
@@ -115,9 +123,10 @@ export function InterestModal({
           <form onSubmit={onSubmit} className="relative flex flex-col">
             <Honeypot value={trap} onChange={setTrap} />
             <DrawerHeader className="text-left">
-              <DrawerTitle className="text-lg font-bold">I&apos;m interested 👋</DrawerTitle>
+              <DrawerTitle className="text-lg font-bold">{spotRequest ? "Request a spot ✋" : "I'm interested 👋"}</DrawerTitle>
               <DrawerDescription className="text-left">
-                Let {firstName} know you want in on <span className="font-medium text-foreground">{planTitle}</span>. No account needed.
+                {spotRequest ? "Ask" : "Let"} {firstName} {spotRequest ? "for a spot on" : "know you want in on"}{" "}
+                <span className="font-medium text-foreground">{planTitle}</span>. No account needed.
               </DrawerDescription>
             </DrawerHeader>
             <div className="space-y-4 p-4">

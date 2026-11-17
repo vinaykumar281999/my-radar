@@ -55,7 +55,7 @@ async function RadarContent({ params }: { params: PageProps<"/[username]">["para
   const radar = await getPublicRadar(username);
   if (!radar) notFound();
 
-  const { profile, plans } = radar;
+  const { profile, plans, spots } = radar;
 
   return (
     <ViewerProvider>
@@ -72,6 +72,7 @@ async function RadarContent({ params }: { params: PageProps<"/[username]">["para
         hostName={profile.display_name}
         hostUsername={profile.username}
         publicPlans={plans}
+        publicSpots={spots}
       />
 
       {!profile.pitches_paused && (

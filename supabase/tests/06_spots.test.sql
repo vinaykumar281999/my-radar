@@ -53,7 +53,7 @@ reset role;
 set role authenticated; select t.as_user(:A);
 select approve_spot((select id from interests where contact_handle = '@blocky'));
 select t.eq((select taken from plan_spots(array['f1f1f1f1-0000-0000-0000-000000000001']::uuid[])), 2, 'full again');
-select block_contact('@blocky');
+select t.eq(block_contact('@blocky')->'interests'->0->>'status', 'approved', 'block result reports the removed person''s status');
 select t.eq((select taken from plan_spots(array['f1f1f1f1-0000-0000-0000-000000000001']::uuid[])), 1, 'blocking an approved person frees the spot');
 update plans set capacity = null where id = :P;
 select t.throws($$select approve_spot('a1000000-0000-0000-0000-000000000002')$$, 'plan_has_no_spots', 'no approvals on plans without spots');

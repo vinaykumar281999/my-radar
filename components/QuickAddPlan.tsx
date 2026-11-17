@@ -56,6 +56,7 @@ const EMPTY: PlanInput = {
   end_date: "",
   notes: "",
   visibility: "public",
+  capacity: null,
 };
 
 const VISIBILITY_LABELS: Record<Visibility, string> = { public: "Public", unlisted: "Unlisted", circles: "Circles" };
@@ -124,6 +125,7 @@ function PlanForm({
           end_date: editing.end_date ?? "",
           notes: editing.notes ?? "",
           visibility: editing.visibility ?? "public",
+          capacity: editing.capacity ?? null,
         }
       : EMPTY,
   );
@@ -168,6 +170,7 @@ function PlanForm({
       specific_dates: start ? null : form.specific_dates?.trim() || null,
       notes: form.notes?.trim() || null,
       visibility: form.visibility,
+      capacity: form.capacity,
     };
 
     const supabase = createClient();
@@ -183,7 +186,11 @@ function PlanForm({
 
     if (error || !data) {
       setPending(false);
-      setError(error?.message ?? "Couldn't save the plan.");
+      setError(
+        error?.message.includes("capacity_below_approved")
+          ? "More people are already approved than that. Take back some spots first."
+          : (error?.message ?? "Couldn't save the plan."),
+      );
       return;
     }
 
@@ -337,6 +344,33 @@ function PlanForm({
         <p className="col-span-2 -mt-1.5 text-xs text-muted-foreground">
           No dates yet? Leave these empty and the “When” bucket is used. Dated plans can be added to calendars.
         </p>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="plan-capacity">
+          Spots <span className="font-normal text-muted-foreground">(optional)</span>
+        </Label>
+        <div className="flex items-center gap-3">
+          <Input
+            id="plan-capacity"
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={50}
+            value={form.capacity ?? ""}
+            onChange={(e) => {
+              const n = Number.parseInt(e.target.value, 10);
+              set("capacity", Number.isNaN(n) ? null : Math.min(50, Math.max(1, n)));
+            }}
+            placeholder="No limit"
+            className="h-11 w-28 text-base"
+          />
+          <p className="text-xs text-muted-foreground">
+            {form.capacity
+              ? `“I'm Interested” becomes “Request a spot”. You approve up to ${form.capacity}.`
+              : "Set a number to approve who gets a spot."}
+          </p>
+        </div>
       </div>
 
       {showLegacyDates && !form.start_date && (

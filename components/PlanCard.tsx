@@ -13,24 +13,45 @@ import { canCopyPlan } from "@/lib/audience";
 import { useViewer } from "@/components/ViewerContext";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import type { Plan } from "@/lib/types";
+import type { InterestStatus, Plan, Spots } from "@/lib/types";
+
+const REQUEST_LABEL: Record<InterestStatus, string> = {
+  pending: "Requested · waiting for an answer",
+  approved: "You're in ✓",
+  declined: "Not this time",
+  interested: "Sent ✓",
+};
 
 type PlanCardProps = {
   plan: Pick<Plan, "id" | "title" | "category" | "timeframe" | "specific_dates" | "status" | "notes"> &
-    Partial<Pick<Plan, "user_id" | "suggested_by_handle" | "chained_from_plan_id" | "start_date" | "end_date" | "visibility">>;
+    Partial<
+      Pick<
+        Plan,
+        "user_id" | "suggested_by_handle" | "chained_from_plan_id" | "start_date" | "end_date" | "visibility" | "capacity"
+      >
+    >;
   hostName: string;
   /** Host's username — enables "Copy to my Radar" attribution. */
   hostUsername?: string;
   demo?: boolean;
   /** Viewer's circles this plan is shared with ("Shared with you · College"). */
   sharedVia?: string[];
+  /** Plans with spots: how many are taken. */
+  spots?: Spots;
+  /** The signed-in viewer's own request on this plan, if any. */
+  myRequest?: InterestStatus;
   className?: string;
 };
 
-export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, className }: PlanCardProps) {
+export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots, myRequest, className }: PlanCardProps) {
   const [open, setOpen] = useState(false);
+  // Set right after sending, so the card updates without a reload.
+  const [sentStatus, setSentStatus] = useState<InterestStatus | null>(null);
   const viewer = useViewer();
   const canCopy = canCopyPlan(plan, viewer?.id ?? null, { demo, hostUsername });
+  const hasSpots = plan.capacity != null;
+  const left = hasSpots && spots ? Math.max(0, spots.capacity - spots.taken) : null;
+  const request = myRequest ?? sentStatus;
 
   return (
     <article className={cn("tap-card p-4", className)}>
@@ -57,6 +78,12 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, classN
 
       {plan.notes && <p className="mt-2 text-sm leading-relaxed text-foreground/80">{plan.notes}</p>}
 
+      {hasSpots && left !== null && (
+        <p className={cn("mt-2 text-sm font-semibold", left === 0 ? "text-muted-foreground" : "text-foreground")}>
+          {left === 0 ? "Full" : `${left} of ${spots!.capacity} spots left`}
+        </p>
+      )}
+
       <ChainPill
         plan={{
           suggested_by_handle: plan.suggested_by_handle ?? null,
@@ -66,9 +93,19 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, classN
       />
 
       <div className="mt-4 flex gap-2">
-        <Button onClick={() => setOpen(true)} className="h-11 flex-1 rounded-xl text-base font-semibold">
-          I&apos;m Interested 👋
-        </Button>
+        {request && hasSpots ? (
+          <p className="flex h-11 flex-1 items-center justify-center rounded-xl bg-muted text-sm font-semibold">
+            {REQUEST_LABEL[request]}
+          </p>
+        ) : (
+          <Button
+            onClick={() => setOpen(true)}
+            disabled={hasSpots && left === 0}
+            className="h-11 flex-1 rounded-xl text-base font-semibold"
+          >
+            {hasSpots ? (left === 0 ? "Full" : "Request a spot ✋") : "I'm Interested 👋"}
+          </Button>
+        )}
         {canCopy && viewer && hostUsername && (
           <CopyToRadarButton plan={plan} viewerId={viewer.id} hostUsername={hostUsername} />
         )}
@@ -90,6 +127,8 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, classN
         planTitle={plan.title}
         hostName={hostName}
         demo={demo}
+        spotRequest={hasSpots}
+        onSent={() => viewer && setSentStatus(hasSpots ? "pending" : "interested")}
       />
     </article>
   );
