@@ -7,6 +7,13 @@ create function auth.uid() returns uuid language sql stable as $$
 $$;
 grant usage on schema auth to anon, authenticated, service_role;
 
+-- Supabase grants its API roles everything on new objects in public by default;
+-- reproduce that so the tests catch a missing REVOKE in schema.sql.
+grant usage on schema public to anon, authenticated, service_role;
+alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
+alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
+
 create schema t;
 
 -- Act as a user for the following statements: `set role authenticated; select t.as_user('...');`

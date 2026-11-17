@@ -105,6 +105,142 @@ create index if not exists plan_pitches_target_idx
   on public.plan_pitches (target_user_id, status, created_at desc);
 
 -- -----------------------------------------------------------------------------
+-- Circles: owner-defined audiences (like Close Friends). A plan with
+-- visibility = 'circles' is visible only to its owner and to signed-in members
+-- of the circles listed in plan_audiences. Members never see each other.
+-- -----------------------------------------------------------------------------
+alter table public.plans drop constraint if exists plans_visibility_check;
+alter table public.plans add constraint plans_visibility_check
+  check (visibility in ('public', 'unlisted', 'circles'));
+
+create table if not exists public.circles (
+  id          uuid primary key default gen_random_uuid(),
+  owner_id    uuid not null references public.profiles (id) on delete cascade,
+  name        text not null check (char_length(btrim(name)) between 1 and 40),
+  created_at  timestamptz not null default now(),
+  unique (owner_id, name),
+  -- target for plan_audiences' composite foreign key
+  unique (id, owner_id)
+);
+
+create table if not exists public.circle_invites (
+  id          uuid primary key default gen_random_uuid(),
+  circle_id   uuid not null references public.circles (id) on delete cascade,
+  token       text not null unique
+                default replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''),
+  created_at  timestamptz not null default now(),
+  expires_at  timestamptz not null default now() + interval '7 days',
+  max_uses    int not null default 25 check (max_uses between 1 and 500),
+  uses        int not null default 0 check (uses >= 0),
+  revoked_at  timestamptz
+);
+
+create index if not exists circle_invites_circle_idx on public.circle_invites (circle_id);
+
+create table if not exists public.circle_members (
+  circle_id   uuid not null references public.circles (id) on delete cascade,
+  user_id     uuid not null references public.profiles (id) on delete cascade,
+  added_at    timestamptz not null default now(),
+  -- set when they joined through an invite link (drives the owner's join notice)
+  invite_id   uuid references public.circle_invites (id) on delete set null,
+  -- when the owner dismissed the "joined via invite link" notice
+  seen_at     timestamptz,
+  primary key (circle_id, user_id)
+);
+
+create index if not exists circle_members_user_idx on public.circle_members (user_id, circle_id);
+
+-- (id, user_id) is already unique via the primary key; the explicit constraint
+-- lets plan_audiences reference it so a plan and its circles share one owner.
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'plans_id_user_key') then
+    alter table public.plans add constraint plans_id_user_key unique (id, user_id);
+  end if;
+end $$;
+
+create table if not exists public.plan_audiences (
+  plan_id    uuid not null,
+  owner_id   uuid not null,
+  circle_id  uuid not null,
+  primary key (plan_id, circle_id),
+  foreign key (plan_id, owner_id) references public.plans (id, user_id) on delete cascade,
+  foreign key (circle_id, owner_id) references public.circles (id, owner_id) on delete cascade
+);
+
+create index if not exists plan_audiences_circle_idx on public.plan_audiences (circle_id);
+
+-- Who sent an interest, when signed in (set by the server, never by clients).
+alter table public.interests
+  add column if not exists user_id uuid references public.profiles (id) on delete set null;
+create unique index if not exists interests_plan_user_key
+  on public.interests (plan_id, user_id) where user_id is not null;
+
+-- Helpers below are SECURITY DEFINER so RLS policies can use them without
+-- recursing through each other's policies. The ones callable by clients only
+-- ever answer about the caller (auth.uid()), never about another user.
+
+create or replace function public.is_circle_owner(p_circle_id uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.circles c where c.id = p_circle_id and c.owner_id = auth.uid());
+$$;
+
+create or replace function public.is_circle_member(p_circle_id uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from public.circle_members cm where cm.circle_id = p_circle_id and cm.user_id = auth.uid()
+  );
+$$;
+
+-- Is the caller a member of a circle this plan is shared with? (Says nothing
+-- about plans that don't exist or aren't shared with them: both are false.)
+create or replace function public.viewer_in_plan_circles(p_plan_id uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select auth.uid() is not null and exists (
+    select 1
+      from public.plan_audiences pa
+      join public.circle_members cm on cm.circle_id = pa.circle_id
+     where pa.plan_id = p_plan_id and cm.user_id = auth.uid()
+  );
+$$;
+
+-- Names of the caller's circles this plan is shared with (for "Shared with you · College").
+create or replace function public.viewer_circle_names(p_plan_id uuid)
+returns text[] language sql stable security definer set search_path = '' as $$
+  select coalesce(array_agg(c.name order by c.name), '{}')
+    from public.plan_audiences pa
+    join public.circle_members cm on cm.circle_id = pa.circle_id and cm.user_id = auth.uid()
+    join public.circles c on c.id = pa.circle_id
+   where pa.plan_id = p_plan_id;
+$$;
+
+-- Could this user open this plan by its id? Owner always; otherwise the plan
+-- must be active and public, unlisted, or shared with one of their circles.
+-- Server-side only (service role, triggers): it answers about any user.
+create or replace function public.can_user_see_plan(p_plan_id uuid, p_user_id uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from public.plans p
+     where p.id = p_plan_id
+       and (
+         p.user_id = p_user_id
+         or (not p.is_archived and p.visibility in ('public', 'unlisted'))
+         or (
+           not p.is_archived and p.visibility = 'circles' and p_user_id is not null
+           and exists (
+             select 1
+               from public.plan_audiences pa
+               join public.circle_members cm on cm.circle_id = pa.circle_id
+              where pa.plan_id = p.id and cm.user_id = p_user_id
+           )
+         )
+       )
+  );
+$$;
+
+revoke all on function public.can_user_see_plan(uuid, uuid) from public, anon, authenticated;
+
+-- -----------------------------------------------------------------------------
 -- Privileges (newer Supabase projects don't always auto-grant on new tables)
 -- -----------------------------------------------------------------------------
 grant usage on schema public to anon, authenticated;
@@ -145,15 +281,25 @@ create policy "profiles_update_own" on public.profiles
   using (auth.uid() = id)
   with check (auth.uid() = id);
 
--- plans: public read of active, public plans (unlisted ones via get_public_plan);
--- owners see (and manage) all of their own
+-- plans: anyone reads active public plans; signed-in members read active plans
+-- shared with their circles; owners see (and manage) all of their own.
+-- Unlisted plans are never listed (they load by id via get_public_plan).
 drop policy if exists "plans_select_public" on public.plans;
 drop policy if exists "plans_insert_own"    on public.plans;
 drop policy if exists "plans_update_own"    on public.plans;
 drop policy if exists "plans_delete_own"    on public.plans;
 
 create policy "plans_select_public" on public.plans
-  for select using ((is_archived = false and visibility = 'public') or auth.uid() = user_id);
+  for select using (
+    auth.uid() = user_id
+    or (
+      is_archived = false
+      and (
+        visibility = 'public'
+        or (visibility = 'circles' and public.viewer_in_plan_circles(id))
+      )
+    )
+  );
 
 create policy "plans_insert_own" on public.plans
   for insert to authenticated
@@ -516,12 +662,20 @@ security definer
 set search_path = ''
 as $$
 declare
-  v_owner uuid;
+  v_owner      uuid;
+  v_visibility text;
 begin
-  select p.user_id into v_owner
+  select p.user_id, p.visibility into v_owner, v_visibility
     from public.plans p
    where p.id = new.plan_id and p.is_archived = false;
   if not found then
+    raise exception 'plan_unavailable' using errcode = 'P0001';
+  end if;
+
+  -- Circle plans: only a signed-in member may send interest. Same error as a
+  -- missing plan, so non-members learn nothing.
+  if v_visibility = 'circles'
+     and (new.user_id is null or not public.can_user_see_plan(new.plan_id, new.user_id)) then
     raise exception 'plan_unavailable' using errcode = 'P0001';
   end if;
 
@@ -623,8 +777,9 @@ revoke all on function public.consume_rate_limit(text, int, int) from public, an
 
 -- -----------------------------------------------------------------------------
 -- One active plan by id, public or unlisted: backs the direct plan link
--- (/username/p/<id>). Plan ids are random UUIDs, so unlisted plans can't be
--- listed or guessed; RLS still hides them from list queries.
+-- (/username/p/<id>) and its metadata. Plan ids are random UUIDs, so unlisted
+-- plans can't be listed or guessed; RLS still hides them from list queries.
+-- Circle plans are never returned here (see get_shared_plan).
 -- -----------------------------------------------------------------------------
 create or replace function public.get_public_plan(p_plan_id uuid)
 returns setof public.plans
@@ -633,7 +788,8 @@ stable
 security definer
 set search_path = ''
 as $$
-  select * from public.plans where id = p_plan_id and is_archived = false;
+  select * from public.plans
+   where id = p_plan_id and is_archived = false and visibility in ('public', 'unlisted');
 $$;
 
 revoke all on function public.get_public_plan(uuid) from public;
@@ -684,6 +840,258 @@ $$;
 
 revoke all on function public.regenerate_calendar_token() from public, anon;
 grant execute on function public.regenerate_calendar_token() to authenticated;
+
+-- -----------------------------------------------------------------------------
+-- Circles: privileges, RLS and RPCs
+-- -----------------------------------------------------------------------------
+revoke all on public.circles, public.circle_members, public.circle_invites, public.plan_audiences from anon;
+grant select, insert, update, delete on public.circles to authenticated;
+grant select, insert, delete on public.circle_members to authenticated;
+-- Owners may only mark join notices as seen, nothing else about a membership.
+revoke update on public.circle_members from authenticated;
+grant update (seen_at) on public.circle_members to authenticated;
+grant select, delete on public.circle_invites to authenticated;
+-- Owners pick the circle, expiry and use limit; the token is always generated.
+revoke insert, update on public.circle_invites from authenticated;
+grant insert (circle_id, expires_at, max_uses) on public.circle_invites to authenticated;
+grant update (revoked_at) on public.circle_invites to authenticated;
+grant select, insert, delete on public.plan_audiences to authenticated;
+
+alter table public.circles        enable row level security;
+alter table public.circle_members enable row level security;
+alter table public.circle_invites enable row level security;
+alter table public.plan_audiences enable row level security;
+
+drop policy if exists "circles_select" on public.circles;
+drop policy if exists "circles_insert_own" on public.circles;
+drop policy if exists "circles_update_own" on public.circles;
+drop policy if exists "circles_delete_own" on public.circles;
+-- Members can read the name of circles they're in (for the "Shared with you" label).
+create policy "circles_select" on public.circles
+  for select to authenticated using (owner_id = auth.uid() or public.is_circle_member(id));
+create policy "circles_insert_own" on public.circles
+  for insert to authenticated with check (owner_id = auth.uid());
+create policy "circles_update_own" on public.circles
+  for update to authenticated using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+create policy "circles_delete_own" on public.circles
+  for delete to authenticated using (owner_id = auth.uid());
+
+drop policy if exists "members_select" on public.circle_members;
+drop policy if exists "members_insert_owner" on public.circle_members;
+drop policy if exists "members_update_owner" on public.circle_members;
+drop policy if exists "members_delete" on public.circle_members;
+-- Owner sees everyone in their circles; a member sees only their own rows.
+create policy "members_select" on public.circle_members
+  for select to authenticated using (user_id = auth.uid() or public.is_circle_owner(circle_id));
+-- Only the owner adds people directly (invite links go through redeem_circle_invite).
+create policy "members_insert_owner" on public.circle_members
+  for insert to authenticated
+  with check (public.is_circle_owner(circle_id) and user_id <> auth.uid() and invite_id is null);
+create policy "members_update_owner" on public.circle_members
+  for update to authenticated
+  using (public.is_circle_owner(circle_id)) with check (public.is_circle_owner(circle_id));
+-- Owner removes anyone; a member can leave.
+create policy "members_delete" on public.circle_members
+  for delete to authenticated using (user_id = auth.uid() or public.is_circle_owner(circle_id));
+
+drop policy if exists "invites_owner" on public.circle_invites;
+create policy "invites_owner" on public.circle_invites
+  for all to authenticated
+  using (public.is_circle_owner(circle_id)) with check (public.is_circle_owner(circle_id));
+
+drop policy if exists "audiences_owner" on public.plan_audiences;
+create policy "audiences_owner" on public.plan_audiences
+  for all to authenticated using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+-- Circle plans of one owner that are shared with the caller, each with
+-- "shared_via": the caller's circle names. SECURITY INVOKER: plans RLS decides.
+create or replace function public.get_shared_plans(p_owner_id uuid)
+returns jsonb
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select coalesce(
+    jsonb_agg(to_jsonb(p) || jsonb_build_object('shared_via', to_jsonb(public.viewer_circle_names(p.id)))
+              order by p.created_at desc),
+    '[]'::jsonb)
+    from public.plans p
+   where p.user_id = p_owner_id
+     and p.user_id <> auth.uid()
+     and p.visibility = 'circles'
+     and not p.is_archived
+     and public.viewer_in_plan_circles(p.id);
+$$;
+
+-- One circle plan by id for the direct link, or null. Same rules as above.
+create or replace function public.get_shared_plan(p_plan_id uuid)
+returns jsonb
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select to_jsonb(p) || jsonb_build_object('shared_via', to_jsonb(public.viewer_circle_names(p.id)))
+    from public.plans p
+   where p.id = p_plan_id
+     and p.visibility = 'circles'
+     and not p.is_archived
+     and public.viewer_in_plan_circles(p.id);
+$$;
+
+revoke all on function public.get_shared_plans(uuid) from public, anon;
+revoke all on function public.get_shared_plan(uuid) from public, anon;
+grant execute on function public.get_shared_plans(uuid) to authenticated;
+grant execute on function public.get_shared_plan(uuid) to authenticated;
+
+-- "View as": the caller's own active plans that p_member would see listed on
+-- their page (null = signed out). Only ever about the caller's own plans.
+create or replace function public.preview_visible_plans(p_member_id uuid)
+returns setof public.plans
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select p.*
+    from public.plans p
+   where p.user_id = auth.uid()
+     and not p.is_archived
+     and (
+       p.visibility = 'public'
+       or (
+         p.visibility = 'circles' and p_member_id is not null
+         and exists (
+           select 1
+             from public.plan_audiences pa
+             join public.circle_members cm on cm.circle_id = pa.circle_id
+            where pa.plan_id = p.id and cm.user_id = p_member_id
+         )
+       )
+     );
+$$;
+
+revoke all on function public.preview_visible_plans(uuid) from public, anon;
+grant execute on function public.preview_visible_plans(uuid) to authenticated;
+
+-- What an invite link is for, shown on /join before signing in.
+-- Invalid links reveal nothing about the circle.
+create or replace function public.get_invite_preview(p_token text)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v record;
+begin
+  select i.expires_at, i.revoked_at, i.uses, i.max_uses, i.circle_id,
+         c.name as circle_name, c.owner_id, pr.username, pr.display_name
+    into v
+    from public.circle_invites i
+    join public.circles c on c.id = i.circle_id
+    join public.profiles pr on pr.id = c.owner_id
+   where i.token = p_token;
+
+  if not found or v.revoked_at is not null or v.expires_at <= now() or v.uses >= v.max_uses then
+    return jsonb_build_object('status', 'invalid');
+  end if;
+
+  return jsonb_build_object(
+    'status', case
+      when v.owner_id = auth.uid() then 'own_circle'
+      when exists (select 1 from public.circle_members cm where cm.circle_id = v.circle_id and cm.user_id = auth.uid())
+        then 'already_member'
+      else 'valid'
+    end,
+    'circle_name', v.circle_name,
+    'owner_username', v.username,
+    'owner_display_name', v.display_name
+  );
+end;
+$$;
+
+-- Join a circle through an invite link. The invite row is locked, so the use
+-- count can't be exceeded by concurrent joins.
+create or replace function public.redeem_circle_invite(p_token text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v     record;
+begin
+  if v_uid is null then
+    raise exception 'not_signed_in' using errcode = '42501';
+  end if;
+  if not exists (select 1 from public.profiles where id = v_uid) then
+    raise exception 'no_profile' using errcode = 'P0001';
+  end if;
+
+  select i.id, i.circle_id, i.expires_at, i.revoked_at, i.uses, i.max_uses, c.owner_id, c.name, pr.username
+    into v
+    from public.circle_invites i
+    join public.circles c on c.id = i.circle_id
+    join public.profiles pr on pr.id = c.owner_id
+   where i.token = p_token
+     for update of i;
+
+  if not found or v.revoked_at is not null or v.expires_at <= now() or v.uses >= v.max_uses then
+    raise exception 'invite_invalid' using errcode = 'P0001';
+  end if;
+
+  if v.owner_id = v_uid then
+    return jsonb_build_object('status', 'own_circle', 'circle_name', v.name, 'owner_username', v.username);
+  end if;
+
+  if exists (select 1 from public.circle_members where circle_id = v.circle_id and user_id = v_uid) then
+    return jsonb_build_object('status', 'already_member', 'circle_name', v.name, 'owner_username', v.username);
+  end if;
+
+  update public.circle_invites set uses = uses + 1 where id = v.id;
+  insert into public.circle_members (circle_id, user_id, invite_id) values (v.circle_id, v_uid, v.id);
+
+  return jsonb_build_object('status', 'joined', 'circle_name', v.name, 'owner_username', v.username);
+end;
+$$;
+
+revoke all on function public.get_invite_preview(text) from public;
+revoke all on function public.redeem_circle_invite(text) from public, anon;
+grant execute on function public.get_invite_preview(text) to anon, authenticated;
+grant execute on function public.redeem_circle_invite(text) to authenticated;
+
+-- "Copy to my Radar" only from active public plans, so a copy can never
+-- republish an unlisted or circle plan. Same error whether the source is
+-- missing or private, so it reveals nothing.
+create or replace function public.guard_plan_copy()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.chained_from_plan_id is not null
+     and (tg_op = 'INSERT' or new.chained_from_plan_id is distinct from old.chained_from_plan_id)
+     and not exists (
+       select 1 from public.plans p
+        where p.id = new.chained_from_plan_id and p.visibility = 'public' and not p.is_archived
+     ) then
+    raise exception 'copy_source_unavailable' using errcode = 'P0001';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.guard_plan_copy() from public, anon, authenticated;
+
+drop trigger if exists plans_guard_copy on public.plans;
+create trigger plans_guard_copy
+  before insert or update of chained_from_plan_id on public.plans
+  for each row execute function public.guard_plan_copy();
 
 -- =============================================================================
 -- service_role (server-only key): keep this section last so it covers every
