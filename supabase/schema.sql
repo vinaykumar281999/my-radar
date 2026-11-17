@@ -70,6 +70,26 @@ alter table public.plans add column if not exists end_date date;
 alter table public.plans
   add column if not exists capacity int check (capacity is null or capacity between 1 and 50);
 
+-- Carpool: a category with a route and a departure. Seats = capacity. The
+-- exact pickup spot and the driver's contact live in plan_private_details.
+alter table public.plans drop constraint if exists plans_category_check;
+alter table public.plans add constraint plans_category_check
+  check (category in ('Trip', 'Concert', 'Weekend', 'Sports', 'Food & Nightlife', 'Carpool'));
+alter table public.plans add column if not exists origin text
+  check (origin is null or char_length(origin) between 1 and 60);
+alter table public.plans add column if not exists destination text
+  check (destination is null or char_length(destination) between 1 and 60);
+alter table public.plans add column if not exists departs_at timestamptz;
+-- IANA zone the departure was entered in, so times read the same for everyone.
+alter table public.plans add column if not exists departs_tz text
+  check (departs_tz is null or char_length(departs_tz) between 1 and 64);
+alter table public.plans drop constraint if exists plans_carpool_fields;
+alter table public.plans add constraint plans_carpool_fields
+  check (category <> 'Carpool' or (
+    capacity is not null and origin is not null and destination is not null
+    and departs_at is not null and departs_tz is not null
+  ));
+
 alter table public.plans drop constraint if exists plans_dates_order;
 alter table public.plans add constraint plans_dates_order
   check (end_date is null or (start_date is not null and end_date >= start_date));
@@ -682,8 +702,9 @@ declare
   v_owner      uuid;
   v_visibility text;
   v_capacity   int;
+  v_category   text;
 begin
-  select p.user_id, p.visibility, p.capacity into v_owner, v_visibility, v_capacity
+  select p.user_id, p.visibility, p.capacity, p.category into v_owner, v_visibility, v_capacity, v_category
     from public.plans p
    where p.id = new.plan_id and p.is_archived = false;
   if not found then
@@ -695,6 +716,12 @@ begin
   if v_visibility = 'circles'
      and (new.user_id is null or not public.can_user_see_plan(new.plan_id, new.user_id)) then
     raise exception 'plan_unavailable' using errcode = 'P0001';
+  end if;
+
+  -- Carpool riders must be signed in: approval later reveals the exact pickup
+  -- to that account, so it has to be a real, identifiable person.
+  if v_category = 'Carpool' and new.user_id is null then
+    raise exception 'sign_in_required' using errcode = 'P0001';
   end if;
 
   -- Status is never chosen by the sender: a request on a plan with spots
@@ -1279,6 +1306,43 @@ drop trigger if exists plans_guard_capacity on public.plans;
 create trigger plans_guard_capacity
   before update of capacity on public.plans
   for each row execute function public.guard_capacity();
+
+-- -----------------------------------------------------------------------------
+-- Private plan details (carpool pickup spot, driver contact). A separate table
+-- because RLS hides rows, not columns: nothing here can reach the public page,
+-- link previews, the story image or anyone's feed. Readable by the owner, and
+-- by riders whose request is approved and who can still see the plan.
+-- -----------------------------------------------------------------------------
+create table if not exists public.plan_private_details (
+  plan_id         uuid primary key,
+  owner_id        uuid not null,
+  pickup_details  text check (pickup_details is null or char_length(pickup_details) <= 280),
+  owner_contact   text check (owner_contact is null or char_length(owner_contact) <= 60),
+  updated_at      timestamptz not null default now(),
+  foreign key (plan_id, owner_id) references public.plans (id, user_id) on delete cascade
+);
+
+alter table public.plan_private_details enable row level security;
+revoke all on public.plan_private_details from anon;
+grant select, insert, update, delete on public.plan_private_details to authenticated;
+
+-- Approved on this plan AND still allowed to see it (e.g. not removed from the circle).
+create or replace function public.viewer_is_approved_rider(p_plan_id uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select auth.uid() is not null
+     and exists (
+       select 1 from public.interests i
+        where i.plan_id = p_plan_id and i.user_id = auth.uid() and i.status = 'approved'
+     )
+     and public.can_user_see_plan(p_plan_id, auth.uid());
+$$;
+
+drop policy if exists "private_details_owner" on public.plan_private_details;
+drop policy if exists "private_details_approved" on public.plan_private_details;
+create policy "private_details_owner" on public.plan_private_details
+  for all to authenticated using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+create policy "private_details_approved" on public.plan_private_details
+  for select to authenticated using (public.viewer_is_approved_rider(plan_id));
 
 -- =============================================================================
 -- service_role (server-only key): keep this section last so it covers every
