@@ -98,10 +98,13 @@ grant select on public.profiles to anon, authenticated;
 grant insert, update on public.profiles to authenticated;
 grant select on public.plans to anon, authenticated;
 grant insert, update, delete on public.plans to authenticated;
-grant insert on public.interests to anon, authenticated;
 grant select, delete on public.interests to authenticated;
-grant insert on public.plan_pitches to anon, authenticated;
 grant select, update, delete on public.plan_pitches to authenticated;
+-- Interests and pitches are submitted only through the app's server actions
+-- (Turnstile + per-IP rate limit), which insert with the service-role key.
+-- Revoking here also removes the direct anon insert older versions granted.
+revoke insert on public.interests from anon, authenticated;
+revoke insert on public.plan_pitches from anon, authenticated;
 
 -- -----------------------------------------------------------------------------
 -- Row-Level Security
@@ -150,19 +153,11 @@ create policy "plans_delete_own" on public.plans
   for delete to authenticated
   using (auth.uid() = user_id);
 
--- interests: anyone can submit (to an active plan); only the plan owner can read/delete
+-- interests: submitted via the server (service role, see guard_interest);
+-- only the plan owner can read/delete
 drop policy if exists "interests_insert_anyone"  on public.interests;
 drop policy if exists "interests_select_owner"   on public.interests;
 drop policy if exists "interests_delete_owner"   on public.interests;
-
-create policy "interests_insert_anyone" on public.interests
-  for insert to anon, authenticated
-  with check (
-    exists (
-      select 1 from public.plans p
-      where p.id = plan_id and p.is_archived = false
-    )
-  );
 
 create policy "interests_select_owner" on public.interests
   for select to authenticated
@@ -182,19 +177,12 @@ create policy "interests_delete_owner" on public.interests
     )
   );
 
--- plan_pitches: anyone can pitch (always as 'pending') to an existing profile;
+-- plan_pitches: submitted via the server (service role, see guard_pitch);
 -- only the target user can read, accept/dismiss, or delete their pitches
 drop policy if exists "pitches_insert_anyone" on public.plan_pitches;
 drop policy if exists "pitches_select_target" on public.plan_pitches;
 drop policy if exists "pitches_update_target" on public.plan_pitches;
 drop policy if exists "pitches_delete_target" on public.plan_pitches;
-
-create policy "pitches_insert_anyone" on public.plan_pitches
-  for insert to anon, authenticated
-  with check (
-    status = 'pending'
-    and exists (select 1 from public.profiles pr where pr.id = target_user_id)
-  );
 
 create policy "pitches_select_target" on public.plan_pitches
   for select to authenticated
@@ -396,3 +384,104 @@ revoke all on function public.username_available(text) from public;
 revoke all on function public.resolve_username(text) from public;
 grant execute on function public.username_available(text) to anon, authenticated;
 grant execute on function public.resolve_username(text) to anon, authenticated;
+
+-- -----------------------------------------------------------------------------
+-- Submission guards. The service role bypasses RLS, so the rules the old
+-- anon INSERT policies enforced live in triggers instead (they also apply to
+-- anything else that writes these tables).
+-- -----------------------------------------------------------------------------
+create or replace function public.guard_interest()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not exists (
+    select 1 from public.plans p where p.id = new.plan_id and p.is_archived = false
+  ) then
+    raise exception 'plan_unavailable' using errcode = 'P0001';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.guard_interest() from public, anon, authenticated;
+
+drop trigger if exists interests_guard on public.interests;
+create trigger interests_guard
+  before insert on public.interests
+  for each row execute function public.guard_interest();
+
+create or replace function public.guard_pitch()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  -- New pitches always start pending.
+  new.status := 'pending';
+  return new;
+end;
+$$;
+
+revoke all on function public.guard_pitch() from public, anon, authenticated;
+
+drop trigger if exists plan_pitches_guard on public.plan_pitches;
+create trigger plan_pitches_guard
+  before insert on public.plan_pitches
+  for each row execute function public.guard_pitch();
+
+-- -----------------------------------------------------------------------------
+-- Per-IP rate limit for public submissions (called by the server with a
+-- hashed IP as the bucket). Sliding window; returns false when over the limit.
+-- -----------------------------------------------------------------------------
+create table if not exists public.rate_limit_hits (
+  bucket  text not null,
+  hit_at  timestamptz not null default now()
+);
+
+create index if not exists rate_limit_hits_bucket_idx on public.rate_limit_hits (bucket, hit_at desc);
+
+alter table public.rate_limit_hits enable row level security;
+revoke all on public.rate_limit_hits from anon, authenticated;
+
+create or replace function public.consume_rate_limit(p_bucket text, p_limit int, p_window_seconds int)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_count int;
+begin
+  perform pg_advisory_xact_lock(hashtext('rate:' || p_bucket));
+
+  delete from public.rate_limit_hits
+   where bucket = p_bucket and hit_at < now() - make_interval(secs => p_window_seconds);
+
+  -- Occasionally sweep buckets that never came back.
+  if random() < 0.01 then
+    delete from public.rate_limit_hits where hit_at < now() - interval '1 day';
+  end if;
+
+  select count(*) into v_count from public.rate_limit_hits where bucket = p_bucket;
+  if v_count >= p_limit then
+    return false;
+  end if;
+
+  insert into public.rate_limit_hits (bucket) values (p_bucket);
+  return true;
+end;
+$$;
+
+revoke all on function public.consume_rate_limit(text, int, int) from public, anon, authenticated;
+
+-- =============================================================================
+-- service_role (server-only key): keep this section last so it covers every
+-- table and function above. It bypasses RLS; the triggers still apply.
+-- =============================================================================
+grant usage on schema public to service_role;
+grant all on all tables in schema public to service_role;
+grant execute on all functions in schema public to service_role;

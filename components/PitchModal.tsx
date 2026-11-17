@@ -15,7 +15,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PillGroup } from "@/components/PillGroup";
 import { CONTACT_HINT, Honeypot } from "@/components/Honeypot";
-import { createClient } from "@/lib/supabase/client";
+import { useTurnstile } from "@/hooks/use-turnstile";
+import { submitPitch } from "@/lib/actions/submit";
+import { submitErrorMessage } from "@/lib/submit-messages";
 import { CATEGORIES, TIMEFRAMES, type Category, type Timeframe } from "@/lib/types";
 
 /** Minimal "Got an idea?" card at the bottom of a public feed; opens the pitch drawer. */
@@ -63,6 +65,7 @@ function PitchModal({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
+  const { containerRef: turnstileRef, getToken: getTurnstileToken } = useTurnstile();
 
   function handleOpenChange(next: boolean) {
     onOpenChange(next);
@@ -90,26 +93,28 @@ function PitchModal({
       setSent(true);
       return;
     }
-    const { error } = await createClient()
-      .from("plan_pitches")
-      .insert({
-        target_user_id: targetUserId,
-        title: title.trim().slice(0, 80),
+    try {
+      const result = await submitPitch({
+        targetUserId,
+        title,
         category,
         timeframe,
-        pitcher_name: name.trim().slice(0, 60),
-        pitcher_handle: handle.trim().slice(0, 60),
-        notes: notes.trim() ? notes.trim().slice(0, 140) : null,
+        name,
+        contact: handle,
+        notes,
+        website: trap,
+        turnstileToken: await getTurnstileToken(),
       });
-    setPending(false);
-    if (error) {
-      if (error.message.includes("too_many_pitches")) {
-        setError(`${hostFirstName} has a lot of pitches waiting right now. Try again in an hour!`);
-      } else {
-        console.error(error);
-        setError("Couldn't send that — please try again.");
+      if (!result.ok) {
+        setError(submitErrorMessage(result.error, hostFirstName));
+        return;
       }
+    } catch (err) {
+      console.error(err);
+      setError("Couldn't send that — please try again.");
       return;
+    } finally {
+      setPending(false);
     }
     setSent(true);
   }
@@ -203,6 +208,7 @@ function PitchModal({
                   {error}
                 </p>
               )}
+              <div ref={turnstileRef} />
             </div>
             <DrawerFooter>
               <Button type="submit" disabled={pending} className="h-12 rounded-xl text-base font-semibold">

@@ -15,7 +15,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { CONTACT_HINT, Honeypot } from "@/components/Honeypot";
-import { createClient } from "@/lib/supabase/client";
+import { useTurnstile } from "@/hooks/use-turnstile";
+import { submitInterest } from "@/lib/actions/submit";
+import { submitErrorMessage } from "@/lib/submit-messages";
 
 type InterestModalProps = {
   open: boolean;
@@ -42,6 +44,7 @@ export function InterestModal({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
+  const { containerRef: turnstileRef, getToken: getTurnstileToken } = useTurnstile();
 
   const firstName = hostName.split(" ")[0] || hostName;
 
@@ -65,21 +68,22 @@ export function InterestModal({
     }
     setPending(true);
     try {
-      if (trap) {
-        // Honeypot filled → bot. Pretend it worked, save nothing.
+      if (trap || demo) {
+        // Honeypot filled → bot (or landing-page demo): pretend it worked, save nothing.
         await new Promise((r) => setTimeout(r, 400));
-      } else if (!demo) {
-        const { error } = await createClient()
-          .from("interests")
-          .insert({
-            plan_id: planId,
-            visitor_name: name.trim().slice(0, 60),
-            contact_handle: contact.trim().slice(0, 60),
-            message: message.trim() ? message.trim().slice(0, 280) : null,
-          });
-        if (error) throw error;
       } else {
-        await new Promise((r) => setTimeout(r, 500));
+        const result = await submitInterest({
+          planId,
+          name,
+          contact,
+          message,
+          website: trap,
+          turnstileToken: await getTurnstileToken(),
+        });
+        if (!result.ok) {
+          setError(submitErrorMessage(result.error, firstName));
+          return;
+        }
       }
       setSent(true);
     } catch (err) {
@@ -161,6 +165,7 @@ export function InterestModal({
                 />
               </div>
               {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
+              {!demo && <div ref={turnstileRef} />}
             </div>
             <DrawerFooter>
               <Button type="submit" disabled={pending} className="h-12 rounded-xl text-base font-semibold">
