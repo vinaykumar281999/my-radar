@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { CATEGORY_EMOJI, STATUS_STYLES } from "@/components/plan-meta";
 import { useHost } from "@/hooks/use-origin";
+import { storyPlans } from "@/lib/audience";
 import { sortPlans, type Plan, type Profile } from "@/lib/types";
 
 type StoryExportModalProps = {
@@ -33,8 +34,7 @@ export function StoryExportModal({ open, onOpenChange, profile, plans }: StoryEx
   const [pending, setPending] = useState(false);
   const host = useHost();
 
-  // Only what's on the public page: no archived or unlisted plans.
-  const shareable = plans.filter((p) => !p.is_archived && p.visibility !== "unlisted");
+  const shareable = storyPlans(plans);
   const upcoming = sortPlans(shareable).slice(0, MAX_PLANS);
   const more = shareable.length - upcoming.length;
 

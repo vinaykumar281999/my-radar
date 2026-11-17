@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2 } from "lucide-react";
+import Link from "next/link";
+import { Check, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +30,7 @@ import {
   type Status,
   type Timeframe,
   type Visibility,
+  type Circle,
 } from "@/lib/types";
 
 type QuickAddPlanProps = {
@@ -37,7 +39,11 @@ type QuickAddPlanProps = {
   userId: string;
   /** When set, the form edits this plan instead of creating a new one. */
   editing?: Plan | null;
-  onSaved: (plan: Plan) => void;
+  /** The owner's circles, for the "Circles" audience. */
+  circles: Pick<Circle, "id" | "name">[];
+  /** Circles the edited plan is currently shared with. */
+  editingCircleIds?: string[];
+  onSaved: (plan: Plan, circleIds: string[]) => void;
 };
 
 const EMPTY: PlanInput = {
@@ -52,9 +58,23 @@ const EMPTY: PlanInput = {
   visibility: "public",
 };
 
-const VISIBILITY_LABELS: Record<Visibility, string> = { public: "Public", unlisted: "Unlisted" };
+const VISIBILITY_LABELS: Record<Visibility, string> = { public: "Public", unlisted: "Unlisted", circles: "Circles" };
 
-export function QuickAddPlan({ open, onOpenChange, userId, editing, onSaved }: QuickAddPlanProps) {
+const VISIBILITY_HINTS: Record<Visibility, string> = {
+  public: "Shown on your Radar page.",
+  unlisted: "Hidden from your page. Only people with the plan's direct link can see it.",
+  circles: "Only signed-in members of the circles you pick. Everyone else sees nothing, not even that it exists.",
+};
+
+export function QuickAddPlan({
+  open,
+  onOpenChange,
+  userId,
+  editing,
+  circles,
+  editingCircleIds,
+  onSaved,
+}: QuickAddPlanProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
@@ -67,8 +87,10 @@ export function QuickAddPlan({ open, onOpenChange, userId, editing, onSaved }: Q
           key={editing?.id ?? "new"}
           userId={userId}
           editing={editing ?? null}
-          onSaved={(plan) => {
-            onSaved(plan);
+          circles={circles}
+          initialCircleIds={editingCircleIds ?? []}
+          onSaved={(plan, circleIds) => {
+            onSaved(plan, circleIds);
             onOpenChange(false);
           }}
         />
@@ -80,11 +102,15 @@ export function QuickAddPlan({ open, onOpenChange, userId, editing, onSaved }: Q
 function PlanForm({
   userId,
   editing,
+  circles,
+  initialCircleIds,
   onSaved,
 }: {
   userId: string;
   editing: Plan | null;
-  onSaved: (plan: Plan) => void;
+  circles: Pick<Circle, "id" | "name">[];
+  initialCircleIds: string[];
+  onSaved: (plan: Plan, circleIds: string[]) => void;
 }) {
   const [form, setForm] = useState<PlanInput>(() =>
     editing
@@ -101,6 +127,7 @@ function PlanForm({
         }
       : EMPTY,
   );
+  const [circleIds, setCircleIds] = useState<string[]>(initialCircleIds);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Older plans used free-text dates; keep that field only for them.
@@ -120,6 +147,11 @@ function PlanForm({
     const end = start ? form.end_date || null : null;
     if (end && start && end < start) {
       setError("The end date is before the start date.");
+      return;
+    }
+    const sharedWith = form.visibility === "circles" ? circleIds.filter((id) => circles.some((c) => c.id === id)) : [];
+    if (form.visibility === "circles" && sharedWith.length === 0) {
+      setError("Pick at least one circle.");
       return;
     }
     setPending(true);
@@ -148,14 +180,33 @@ function PlanForm({
           .single<Plan>();
 
     const { data, error } = await query;
-    setPending(false);
 
     if (error || !data) {
+      setPending(false);
       setError(error?.message ?? "Couldn't save the plan.");
       return;
     }
+
+    // Visibility + circles in one transaction. Saving "circles" above first
+    // means a failure here leaves the plan visible to you alone, never wider.
+    const { error: audienceError } = await supabase.rpc("set_plan_audience", {
+      p_plan_id: data.id,
+      p_visibility: form.visibility,
+      p_circle_ids: sharedWith,
+    });
+    setPending(false);
+    if (audienceError) {
+      console.error("set_plan_audience", audienceError);
+      setError("Saved, but couldn't update who can see it. Try saving again.");
+      return;
+    }
+
     toast.success(editing ? "Plan updated" : "Plan posted 🚀");
-    onSaved(data);
+    onSaved(data, sharedWith);
+  }
+
+  function toggleCircle(id: string) {
+    setCircleIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
   }
 
   return (
@@ -216,11 +267,35 @@ function PlanForm({
           onChange={(v) => set("visibility", v)}
           renderOption={(v) => VISIBILITY_LABELS[v]}
         />
-        <p className="text-xs text-muted-foreground">
-          {form.visibility === "public"
-            ? "Shown on your Radar page."
-            : "Hidden from your page. Only people with the plan's direct link can see it."}
-        </p>
+        <p className="text-xs text-muted-foreground">{VISIBILITY_HINTS[form.visibility]}</p>
+        {form.visibility === "circles" &&
+          (circles.length === 0 ? (
+            <p className="rounded-lg bg-muted px-3 py-2 text-sm">
+              You don&apos;t have any circles yet.{" "}
+              <Link href="/settings" className="font-semibold underline underline-offset-2">
+                Create one in Settings
+              </Link>
+            </p>
+          ) : (
+            <div role="group" aria-label="Circles" className="flex flex-wrap gap-1.5 pt-1">
+              {circles.map((c) => {
+                const checked = circleIds.includes(c.id);
+                return (
+                  <label
+                    key={c.id}
+                    className={cn(
+                      "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-sm font-medium transition-colors",
+                      checked ? "border-foreground bg-foreground text-background" : "hover:bg-muted",
+                    )}
+                  >
+                    <input type="checkbox" checked={checked} onChange={() => toggleCircle(c.id)} className="sr-only" />
+                    {checked && <Check className="size-3.5" />}
+                    {c.name}
+                  </label>
+                );
+              })}
+            </div>
+          ))}
       </div>
 
       <div className="grid grid-cols-2 gap-3">

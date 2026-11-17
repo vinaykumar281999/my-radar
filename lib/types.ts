@@ -18,7 +18,7 @@ export const TIMEFRAMES = [
 
 export const STATUSES = ["Just an Idea", "Booking Soon", "Locked In"] as const;
 
-export const VISIBILITIES = ["public", "unlisted"] as const;
+export const VISIBILITIES = ["public", "unlisted", "circles"] as const;
 
 export type Category = (typeof CATEGORIES)[number];
 export type Timeframe = (typeof TIMEFRAMES)[number];
@@ -48,7 +48,10 @@ export type Plan = {
   status: Status;
   notes: string | null;
   is_archived: boolean;
-  /** "unlisted" plans only show via their direct link (/username/p/id). */
+  /**
+   * "unlisted": only via the direct link (/username/p/id).
+   * "circles": only the owner and signed-in members of its circles (plan_audiences).
+   */
   visibility: Visibility;
   /** "@handle" or a first name — never a phone number (see publicAttribution). */
   suggested_by_handle: string | null;

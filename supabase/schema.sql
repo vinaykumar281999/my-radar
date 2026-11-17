@@ -1064,6 +1064,40 @@ revoke all on function public.redeem_circle_invite(text) from public, anon;
 grant execute on function public.get_invite_preview(text) to anon, authenticated;
 grant execute on function public.redeem_circle_invite(text) to authenticated;
 
+-- Set a plan's audience in one transaction: visibility plus, for 'circles',
+-- exactly these circles. SECURITY INVOKER: RLS limits it to the caller's own
+-- plan, and plan_audiences' foreign keys to the caller's own circles.
+create or replace function public.set_plan_audience(p_plan_id uuid, p_visibility text, p_circle_ids uuid[] default '{}')
+returns void
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_ids uuid[] := coalesce(p_circle_ids, '{}');
+begin
+  if p_visibility = 'circles' and cardinality(v_ids) = 0 then
+    raise exception 'circles_required' using errcode = '22023';
+  end if;
+
+  update public.plans set visibility = p_visibility where id = p_plan_id and user_id = auth.uid();
+  if not found then
+    raise exception 'plan_not_found' using errcode = 'P0002';
+  end if;
+
+  if p_visibility <> 'circles' then
+    v_ids := '{}';
+  end if;
+  delete from public.plan_audiences where plan_id = p_plan_id and not (circle_id = any (v_ids));
+  insert into public.plan_audiences (plan_id, owner_id, circle_id)
+  select p_plan_id, auth.uid(), unnest(v_ids)
+  on conflict do nothing;
+end;
+$$;
+
+revoke all on function public.set_plan_audience(uuid, text, uuid[]) from public, anon;
+grant execute on function public.set_plan_audience(uuid, text, uuid[]) to authenticated;
+
 -- "Copy to my Radar" only from active public plans, so a copy can never
 -- republish an unlisted or circle plan. Same error whether the source is
 -- missing or private, so it reveals nothing.

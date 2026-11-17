@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { DashboardClient } from "./DashboardClient";
 import { Skeleton } from "@/components/ui/skeleton";
 import { requireProfile } from "@/lib/data/session";
-import type { JoinNotice, Pitch, Plan, PlanWithCount } from "@/lib/types";
+import type { Circle, JoinNotice, Pitch, Plan, PlanWithCount } from "@/lib/types";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
@@ -18,7 +18,13 @@ export default function DashboardPage() {
 async function DashboardData() {
   const { supabase, profile } = await requireProfile();
 
-  const [{ data, error }, { data: pitches, error: pitchesError }, { data: notices, error: noticesError }] = await Promise.all([
+  const [
+    { data, error },
+    { data: pitches, error: pitchesError },
+    { data: notices, error: noticesError },
+    { data: circles, error: circlesError },
+    { data: audiences, error: audiencesError },
+  ] = await Promise.all([
     supabase
       .from("plans")
       .select("*, interests(count)")
@@ -43,11 +49,18 @@ async function DashboardData() {
       .is("seen_at", null)
       .order("added_at", { ascending: false })
       .returns<JoinNotice[]>(),
+    supabase.from("circles").select("id, name").eq("owner_id", profile.id).order("name").returns<Pick<Circle, "id" | "name">[]>(),
+    supabase.from("plan_audiences").select("plan_id, circle_id").eq("owner_id", profile.id).returns<{ plan_id: string; circle_id: string }[]>(),
   ]);
 
   if (error) console.error("dashboard plans", error);
   if (pitchesError) console.error("dashboard pitches", pitchesError);
   if (noticesError) console.error("dashboard join notices", noticesError);
+  if (circlesError) console.error("dashboard circles", circlesError);
+  if (audiencesError) console.error("dashboard audiences", audiencesError);
+
+  const audienceByPlan: Record<string, string[]> = {};
+  for (const a of audiences ?? []) (audienceByPlan[a.plan_id] ??= []).push(a.circle_id);
 
   const plans: PlanWithCount[] = (data ?? []).map(({ interests, ...plan }) => ({
     ...plan,
@@ -60,6 +73,8 @@ async function DashboardData() {
       initialPlans={plans}
       initialPitches={pitches ?? []}
       initialJoinNotices={notices ?? []}
+      circles={circles ?? []}
+      initialAudiences={audienceByPlan}
     />
   );
 }

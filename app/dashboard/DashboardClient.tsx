@@ -20,6 +20,7 @@ import {
   Settings,
   Trash2,
   Users,
+  UsersRound,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -36,16 +37,26 @@ import { useOrigin } from "@/hooks/use-origin";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { formatDateRange } from "@/lib/dates";
-import { STATUSES, sortPlans, type BlockResult, type JoinNotice, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
+import { STATUSES, sortPlans, type BlockResult, type Circle, type JoinNotice, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
 
 type DashboardClientProps = {
   profile: Profile;
   initialPlans: PlanWithCount[];
   initialPitches: Pitch[];
   initialJoinNotices: JoinNotice[];
+  circles: Pick<Circle, "id" | "name">[];
+  /** plan id -> circle ids it's shared with */
+  initialAudiences: Record<string, string[]>;
 };
 
-export function DashboardClient({ profile, initialPlans, initialPitches, initialJoinNotices }: DashboardClientProps) {
+export function DashboardClient({
+  profile,
+  initialPlans,
+  initialPitches,
+  initialJoinNotices,
+  circles,
+  initialAudiences,
+}: DashboardClientProps) {
   const [plans, setPlans] = useState<PlanWithCount[]>(initialPlans);
   const [composerOpen, setComposerOpen] = useState(false);
   const [editing, setEditing] = useState<Plan | null>(null);
@@ -57,6 +68,9 @@ export function DashboardClient({ profile, initialPlans, initialPitches, initial
   const [pitchesOpen, setPitchesOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [view, setView] = useState<"list" | "month">("list");
+  const [audiences, setAudiences] = useState(initialAudiences);
+  const circleNames = (planId: string) =>
+    (audiences[planId] ?? []).map((id) => circles.find((c) => c.id === id)?.name).filter(Boolean) as string[];
   const origin = useOrigin();
 
   const publicPath = `/${profile.username}`;
@@ -79,7 +93,13 @@ export function DashboardClient({ profile, initialPlans, initialPitches, initial
   async function copyPlanLink(plan: Plan) {
     const url = `${window.location.origin}${publicPath}/p/${plan.id}`;
     if (await copyText(url)) {
-      toast.success(plan.visibility === "unlisted" ? "Private link copied — only people with it can see this plan" : "Plan link copied");
+      toast.success(
+        plan.visibility === "unlisted"
+          ? "Private link copied — only people with it can see this plan"
+          : plan.visibility === "circles"
+            ? `Link copied — only members of ${circleNames(plan.id).join(", ") || "its circles"} can open it`
+            : "Plan link copied",
+      );
     } else {
       toast.error("Couldn't copy the link");
     }
@@ -95,7 +115,8 @@ export function DashboardClient({ profile, initialPlans, initialPitches, initial
     setComposerOpen(true);
   }
 
-  function onSaved(saved: Plan) {
+  function onSaved(saved: Plan, circleIds: string[] = []) {
+    setAudiences((a) => ({ ...a, [saved.id]: circleIds }));
     setPlans((prev) => {
       const existing = prev.find((p) => p.id === saved.id);
       return existing
@@ -294,6 +315,7 @@ export function DashboardClient({ profile, initialPlans, initialPitches, initial
                   setLeadsPlan(plan);
                 }}
                 onCopyLink={() => copyPlanLink(plan)}
+                circleNames={circleNames(plan.id)}
               />
             ))}
           </ul>
@@ -341,6 +363,8 @@ export function DashboardClient({ profile, initialPlans, initialPitches, initial
         onOpenChange={setComposerOpen}
         userId={profile.id}
         editing={editing}
+        circles={circles}
+        editingCircleIds={editing ? (audiences[editing.id] ?? []) : []}
         onSaved={onSaved}
       />
       <PitchesDrawer
@@ -371,9 +395,19 @@ type ManagePlanRowProps = {
   onDelete: () => void;
   onLeads: () => void;
   onCopyLink: () => void;
+  circleNames: string[];
 };
 
-function ManagePlanRow({ plan, onStatus, onEdit, onArchive, onDelete, onLeads, onCopyLink }: ManagePlanRowProps) {
+function ManagePlanRow({
+  plan,
+  onStatus,
+  onEdit,
+  onArchive,
+  onDelete,
+  onLeads,
+  onCopyLink,
+  circleNames,
+}: ManagePlanRowProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
@@ -395,6 +429,12 @@ function ManagePlanRow({ plan, onStatus, onEdit, onArchive, onDelete, onLeads, o
               : `${plan.timeframe}${plan.specific_dates ? ` · ${plan.specific_dates}` : ""}`}
           </p>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {plan.visibility === "circles" && (
+              <span className="inline-flex max-w-full items-center gap-1 truncate rounded-full bg-foreground px-2 py-0.5 text-[11px] font-semibold text-background">
+                <UsersRound className="size-3 shrink-0" />
+                {circleNames.length ? circleNames.join(", ") : "No circles — only you"}
+              </span>
+            )}
             {plan.visibility === "unlisted" && (
               <span className="inline-flex items-center gap-1 rounded-full bg-foreground px-2 py-0.5 text-[11px] font-semibold text-background">
                 <EyeOff className="size-3" /> Unlisted

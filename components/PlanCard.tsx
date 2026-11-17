@@ -9,6 +9,7 @@ import { CategoryLabel, ChainPill, StatusPill } from "@/components/plan-meta";
 import { InterestModal } from "@/components/InterestModal";
 import { AddToCalendar } from "@/components/AddToCalendar";
 import { formatDateRange } from "@/lib/dates";
+import { canCopyPlan } from "@/lib/audience";
 import { useViewer } from "@/components/ViewerContext";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -16,7 +17,7 @@ import type { Plan } from "@/lib/types";
 
 type PlanCardProps = {
   plan: Pick<Plan, "id" | "title" | "category" | "timeframe" | "specific_dates" | "status" | "notes"> &
-    Partial<Pick<Plan, "user_id" | "suggested_by_handle" | "chained_from_plan_id" | "start_date" | "end_date">>;
+    Partial<Pick<Plan, "user_id" | "suggested_by_handle" | "chained_from_plan_id" | "start_date" | "end_date" | "visibility">>;
   hostName: string;
   /** Host's username — enables "Copy to my Radar" attribution. */
   hostUsername?: string;
@@ -27,7 +28,7 @@ type PlanCardProps = {
 export function PlanCard({ plan, hostName, hostUsername, demo, className }: PlanCardProps) {
   const [open, setOpen] = useState(false);
   const viewer = useViewer();
-  const canCopy = !demo && !!viewer && !!hostUsername && viewer.id !== plan.user_id;
+  const canCopy = canCopyPlan(plan, viewer?.id ?? null, { demo, hostUsername });
 
   return (
     <article className={cn("tap-card p-4", className)}>
@@ -59,7 +60,9 @@ export function PlanCard({ plan, hostName, hostUsername, demo, className }: Plan
         <Button onClick={() => setOpen(true)} className="h-11 flex-1 rounded-xl text-base font-semibold">
           I&apos;m Interested 👋
         </Button>
-        {canCopy && <CopyToRadarButton plan={plan} viewerId={viewer.id} hostUsername={hostUsername} />}
+        {canCopy && viewer && hostUsername && (
+          <CopyToRadarButton plan={plan} viewerId={viewer.id} hostUsername={hostUsername} />
+        )}
       </div>
 
       {plan.start_date && !demo && (
@@ -113,9 +116,13 @@ function CopyToRadarButton({
         suggested_by_handle: `@${hostUsername}`,
       });
     if (error) {
-      console.error(error);
       setState("idle");
-      toast.error("Couldn't copy that plan.");
+      if (error.message.includes("copy_source_unavailable")) {
+        toast.error("This plan can't be copied.");
+      } else {
+        console.error(error);
+        toast.error("Couldn't copy that plan.");
+      }
       return;
     }
     setState("done");
