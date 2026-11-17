@@ -29,21 +29,23 @@ import { PitchesDrawer } from "@/components/PitchesDrawer";
 import { QuickAddPlan } from "@/components/QuickAddPlan";
 import { LeadsDrawer } from "@/components/LeadsDrawer";
 import { MonthView } from "@/components/MonthView";
+import { JoinNotices } from "@/components/JoinNotices";
 import { StoryExportModal } from "@/components/StoryExportModal";
 import { copyText } from "@/components/ShareButton";
 import { useOrigin } from "@/hooks/use-origin";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { formatDateRange } from "@/lib/dates";
-import { STATUSES, sortPlans, type BlockResult, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
+import { STATUSES, sortPlans, type BlockResult, type JoinNotice, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
 
 type DashboardClientProps = {
   profile: Profile;
   initialPlans: PlanWithCount[];
   initialPitches: Pitch[];
+  initialJoinNotices: JoinNotice[];
 };
 
-export function DashboardClient({ profile, initialPlans, initialPitches }: DashboardClientProps) {
+export function DashboardClient({ profile, initialPlans, initialPitches, initialJoinNotices }: DashboardClientProps) {
   const [plans, setPlans] = useState<PlanWithCount[]>(initialPlans);
   const [composerOpen, setComposerOpen] = useState(false);
   const [editing, setEditing] = useState<Plan | null>(null);
@@ -184,6 +186,8 @@ export function DashboardClient({ profile, initialPlans, initialPitches }: Dashb
           </form>
         </div>
       </header>
+
+      <JoinNotices initialNotices={initialJoinNotices} />
 
       {/* Profile + top bar */}
       <section className="tap-card mt-4 p-4">

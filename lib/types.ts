@@ -82,6 +82,48 @@ export type Pitch = {
   created_at: string;
 };
 
+export type Circle = {
+  id: string;
+  owner_id: string;
+  name: string;
+  created_at: string;
+};
+
+export type CircleMember = {
+  circle_id: string;
+  user_id: string;
+  added_at: string;
+  /** Set when they joined through an invite link. */
+  invite_id: string | null;
+  seen_at: string | null;
+  profiles: Pick<Profile, "username" | "display_name"> | null;
+};
+
+export type CircleInvite = {
+  id: string;
+  circle_id: string;
+  token: string;
+  created_at: string;
+  expires_at: string;
+  max_uses: number;
+  uses: number;
+  revoked_at: string | null;
+};
+
+/** A "joined via invite link" notice on the owner's dashboard. */
+export type JoinNotice = {
+  circle_id: string;
+  user_id: string;
+  added_at: string;
+  circles: { name: string } | null;
+  profiles: Pick<Profile, "username" | "display_name"> | null;
+};
+
+/** `now` is passed in (ms) so components can keep render pure. */
+export function inviteIsActive(invite: Pick<CircleInvite, "revoked_at" | "expires_at" | "uses" | "max_uses">, now: number) {
+  return !invite.revoked_at && new Date(invite.expires_at).getTime() > now && invite.uses < invite.max_uses;
+}
+
 export type BlockedContact = {
   id: string;
   owner_id: string;
@@ -113,7 +155,7 @@ export const USERNAME_RE = /^[a-z0-9_]{3,30}$/;
 
 export const RESERVED_USERNAMES = new Set([
   "login", "logout", "onboarding", "dashboard", "auth", "api",
-  "admin", "settings", "about", "help", "radar", "_next",
+  "admin", "settings", "about", "help", "radar", "_next", "join",
 ]);
 
 type Sortable = Pick<Plan, "timeframe" | "created_at"> & Partial<Pick<Plan, "start_date">>;

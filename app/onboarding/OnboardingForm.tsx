@@ -9,7 +9,16 @@ import { Label } from "@/components/ui/label";
 import { UsernameField, useUsernameAvailability } from "@/components/UsernameField";
 import { createClient } from "@/lib/supabase/client";
 
-export function OnboardingForm({ userId, suggestedUsername }: { userId: string; suggestedUsername: string }) {
+export function OnboardingForm({
+  userId,
+  suggestedUsername,
+  next = "/dashboard",
+}: {
+  userId: string;
+  suggestedUsername: string;
+  /** Where to go once the profile exists (already validated by safeNext). */
+  next?: string;
+}) {
   const router = useRouter();
   const [username, setUsername] = useState(suggestedUsername.length >= 3 ? suggestedUsername : "");
   const [displayName, setDisplayName] = useState("");
@@ -39,7 +48,7 @@ export function OnboardingForm({ userId, suggestedUsername }: { userId: string; 
       if (error.code === "23505") markTaken();
       return;
     }
-    router.replace("/dashboard");
+    router.replace(next);
     router.refresh();
   }
 

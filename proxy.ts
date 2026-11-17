@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { RESERVED_USERNAMES } from "@/lib/types";
+import { safeNext } from "@/lib/safe-next";
 
 const PROTECTED = ["/dashboard", "/onboarding", "/settings"];
 
@@ -59,15 +60,15 @@ export async function proxy(request: NextRequest) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     loginUrl.search = "";
-    loginUrl.searchParams.set("next", pathname);
+    // Keep the query (e.g. /onboarding?next=/join/...) so the round trip lands in the same place.
+    loginUrl.searchParams.set("next", pathname + request.nextUrl.search);
     return redirectWithCookies(loginUrl, response);
   }
 
   if (user && pathname === "/login") {
-    const dashUrl = request.nextUrl.clone();
-    dashUrl.pathname = "/dashboard";
-    dashUrl.search = "";
-    return redirectWithCookies(dashUrl, response);
+    // Already signed in: go where the login was headed (e.g. back to an invite link).
+    const target = new URL(safeNext(request.nextUrl.searchParams.get("next")), request.url);
+    return redirectWithCookies(target, response);
   }
 
   return response;
@@ -114,6 +115,8 @@ export const config = {
     "/settings/:path*",
     "/login",
     "/auth/:path*",
+    // Invite links: refresh the session so a signed-in visitor is recognized.
+    "/join/:path*",
     // Public pages, only for the old-username redirect (no auth work there).
     "/:username([A-Za-z0-9_]{3,30})",
     "/:username([A-Za-z0-9_]{3,30})/p/:id",
