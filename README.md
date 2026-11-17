@@ -43,6 +43,6 @@ Magic link and email/password both work. If "Confirm email" is on in Supabase, p
 - `proxy.ts` (Next 16's replacement for `middleware.ts`) refreshes the Supabase session cookie, gates `/dashboard`, `/onboarding` and `/settings`, and 308-redirects old usernames to the current one (the page itself streams, so it can't send a real 308).
 - Cache Components is on, so anything that reads cookies or `params` sits behind a `<Suspense>` boundary with a skeleton fallback.
 - Owner writes go straight from the browser to Supabase, with row-level security as the authorization layer.
-- Public submissions (“I'm Interested”, pitches) go through server actions in `lib/actions/submit.ts`: honeypot → Turnstile → per-IP limit (5 per 10 minutes, hashed IP) → insert with the service-role key. Anon INSERT on those tables is revoked, and database triggers enforce the per-person pitch cap, paused pitches and blocked senders.
+- Public submissions (“I'm Interested”, pitches) go through server actions in `lib/actions/submit.ts`: honeypot → Turnstile → per-IP limit (20 per 10 minutes, hashed IP) → insert with the service-role key. Anon INSERT on those tables is revoked, and database triggers enforce the per-person pitch cap, paused pitches and blocked senders.
 - `node --env-file=.env.local scripts/check-rls.mjs` runs read-only anon checks against your project.
 - Usernames that collide with app routes (`login`, `dashboard`, …) are rejected by both the database and the UI.

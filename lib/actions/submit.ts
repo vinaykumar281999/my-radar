@@ -17,8 +17,13 @@ export type SubmitError =
 
 export type SubmitResult = { ok: true } | { ok: false; error: SubmitError };
 
-/** Shared by both forms: at most this many submissions per IP per window. */
-const IP_LIMIT = 5;
+/**
+ * Shared by both forms: at most this many submissions per IP per window.
+ * Generous on purpose: Turnstile stops bots, and many real people share an IP
+ * (same Wi-Fi, mobile carrier NAT). The value is passed to consume_rate_limit(),
+ * so changing it needs no schema change.
+ */
+const IP_LIMIT = 20;
 const IP_WINDOW_SECONDS = 10 * 60;
 
 type Common = {

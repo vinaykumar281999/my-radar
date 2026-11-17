@@ -102,7 +102,7 @@ Setup: see "Before testing" at the top.
   const el = document.querySelector('input[name=website]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, 'spam'); el.dispatchEvent(new Event('input', { bubbles: true }));
   ```
   Submit → the success screen shows, but **no** pitch/lead appears in the dashboard
-- [ ] Per-person pitch cap (10 pending per hour): the per-IP limit (section 12) stops one network at 5, so this one can't be reached from a single browser. It was tested in the database; to see the message, send pitches from several networks (e.g. phone on cellular + Wi-Fi) until the 11th shows "<Name> has a lot of pitches waiting right now. Try again in an hour!"
+- [ ] Per-person pitch cap (10 pending per hour) — reachable from one browser again now that the per-IP limit is 20 per 10 minutes (section 12). Start with no pending pitches and no submissions from this network in the last 10 minutes, then send 10 pitches to the same profile from a private window → the 11th shows "<Name> has a lot of pitches waiting right now. Try again in an hour!" Dismissing/accepting pending ones frees up the cap.
 
 ## 11. Settings + username change
 - [ ] Dashboard header → gear icon → `/settings`. Signed out, `/settings` → `/login?next=/settings`
@@ -119,7 +119,7 @@ Setup: see "Before testing" at the top.
 ## 12. Spam protection (server-side)
 - [ ] Interest and pitch still work end to end (private window) after adding `SUPABASE_SERVICE_ROLE_KEY`
 - [ ] Direct API insert is blocked: `node --env-file=.env.local scripts/check-rls.mjs` → "anon INSERT on … is revoked" PASS
-- [ ] Per-IP limit: from one browser send 5 interests/pitches (any mix) within 10 minutes → the 6th shows "You've sent a lot in the last few minutes. Try again in 10 minutes."
+- [ ] Per-IP limit (20 per 10 minutes, interests and pitches combined): from one browser, 20 attempts within 10 minutes go through → the 21st shows "You've sent a lot in the last few minutes. Try again in 10 minutes." Every attempt counts, including ones refused for another reason. Use mostly interests (pitches stop at 10 per person first). E.g. right after the section 10 pitch-cap test (10 sent + 1 refused = 11 attempts), 9 more interests go through and the 10th is refused
 - [ ] Honeypot still fakes success (section 10 console snippet) and nothing is saved
 - [ ] Turnstile with test keys in `.env.local`: `NEXT_PUBLIC_TURNSTILE_SITE_KEY=1x00000000000000000000AA`, `TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA` → restart dev → submissions work, Network tab shows a `challenges.cloudflare.com` request
 - [ ] Always-fail keys: site `2x00000000000000000000AB`, secret `2x0000000000000000000000000000000AA` → "We couldn't verify you're human…", nothing saved
