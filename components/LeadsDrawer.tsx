@@ -14,17 +14,21 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { copyText } from "@/components/ShareButton";
 import { ContactChip } from "@/components/ContactChip";
+import { BlockButton, BulkToolbar, matchesQuery, toggleAll } from "@/components/BulkToolbar";
 import { parseContact } from "@/lib/contact";
+import { csvFilename, downloadCsv, toCsv } from "@/lib/csv";
 import { createClient } from "@/lib/supabase/client";
-import type { Interest, Plan } from "@/lib/types";
+import type { BlockResult, Interest, Plan } from "@/lib/types";
 
 type LeadsDrawerProps = {
   plan: Plan | null;
   onOpenChange: (open: boolean) => void;
   onCountChange: (planId: string, count: number) => void;
+  /** A sender was blocked: their pitches/interests everywhere were cleared. */
+  onBlocked: (result: BlockResult) => void;
 };
 
-export function LeadsDrawer({ plan, onOpenChange, onCountChange }: LeadsDrawerProps) {
+export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: LeadsDrawerProps) {
   const planId = plan?.id;
   // Loaded leads, keyed by plan so switching plans shows a fresh loading state.
   const [loaded, setLoaded] = useState<{ planId: string; leads: Interest[] | null; error: string | null } | null>(
@@ -33,6 +37,12 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange }: LeadsDrawerPr
   const current = loaded && loaded.planId === planId ? loaded : null;
   const leads = current?.leads ?? null;
   const error = current?.error ?? null;
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [bulkPending, setBulkPending] = useState(false);
+
+  const visible = (leads ?? []).filter((l) => matchesQuery(query, [l.visitor_name, l.contact_handle, l.message]));
+  const selectedVisible = visible.filter((l) => selected.has(l.id));
 
   function setLeads(next: Interest[] | null) {
     if (planId) setLoaded({ planId, leads: next, error: null });
@@ -60,18 +70,53 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange }: LeadsDrawerPr
     };
   }, [planId, onCountChange]);
 
-  async function removeLead(id: string) {
-    if (!planId) return;
+  async function removeLeads(ids: string[]) {
+    if (!planId || ids.length === 0) return false;
     const prev = leads;
-    const next = (leads ?? []).filter((l) => l.id !== id);
+    const next = (leads ?? []).filter((l) => !ids.includes(l.id));
     setLeads(next);
-    const { error } = await createClient().from("interests").delete().eq("id", id);
+    const { error } = await createClient().from("interests").delete().in("id", ids);
     if (error) {
       setLeads(prev);
-      toast.error("Couldn't remove that one.");
-    } else {
-      onCountChange(planId, next.length);
+      toast.error(ids.length === 1 ? "Couldn't remove that one." : "Couldn't remove those.");
+      return false;
     }
+    onCountChange(planId, next.length);
+    return true;
+  }
+
+  async function removeSelected() {
+    const ids = selectedVisible.map((l) => l.id);
+    setBulkPending(true);
+    const ok = await removeLeads(ids);
+    setBulkPending(false);
+    if (ok) {
+      setSelected(new Set());
+      toast.success(`Removed ${ids.length}`);
+    }
+  }
+
+  function toggle(id: string) {
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function handleBlocked(result: BlockResult) {
+    const removed = new Set(result.interests.map((i) => i.id));
+    setLeads((leads ?? []).filter((l) => !removed.has(l.id)));
+    onBlocked(result);
+  }
+
+  function exportCsv() {
+    const csv = toCsv(
+      ["Received", "Name", "Contact", "Note", "Plan"],
+      visible.map((l) => [l.created_at, l.visitor_name, l.contact_handle, l.message, plan?.title]),
+    );
+    downloadCsv(csvFilename("interested"), csv);
   }
 
   return (
@@ -83,6 +128,21 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange }: LeadsDrawerPr
           </DrawerTitle>
           <DrawerDescription className="text-left">{plan?.title}</DrawerDescription>
         </DrawerHeader>
+
+        {leads && leads.length > 0 && (
+          <BulkToolbar
+            query={query}
+            onQuery={setQuery}
+            placeholder="Search name, contact, note"
+            visibleCount={visible.length}
+            selectedCount={selectedVisible.length}
+            onToggleAll={() => setSelected((s) => toggleAll(s, visible.map((l) => l.id)))}
+            bulkLabel="Remove"
+            onBulk={removeSelected}
+            bulkPending={bulkPending}
+            onExport={exportCsv}
+          />
+        )}
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {error ? (
@@ -98,10 +158,19 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange }: LeadsDrawerPr
               <p className="mt-2 font-semibold">No one yet</p>
               <p className="mt-1 text-sm text-muted-foreground">Share your link — the first “I&apos;m in” is the hardest.</p>
             </div>
+          ) : visible.length === 0 ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">No one matches “{query}”.</p>
           ) : (
             <ul className="space-y-3">
-              {leads.map((lead) => (
-                <LeadRow key={lead.id} lead={lead} onRemove={() => removeLead(lead.id)} />
+              {visible.map((lead) => (
+                <LeadRow
+                  key={lead.id}
+                  lead={lead}
+                  selected={selected.has(lead.id)}
+                  onToggle={() => toggle(lead.id)}
+                  onRemove={() => removeLeads([lead.id])}
+                  onBlocked={handleBlocked}
+                />
               ))}
             </ul>
           )}
@@ -111,7 +180,19 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange }: LeadsDrawerPr
   );
 }
 
-function LeadRow({ lead, onRemove }: { lead: Interest; onRemove: () => void }) {
+function LeadRow({
+  lead,
+  selected,
+  onToggle,
+  onRemove,
+  onBlocked,
+}: {
+  lead: Interest;
+  selected: boolean;
+  onToggle: () => void;
+  onRemove: () => void;
+  onBlocked: (result: BlockResult) => void;
+}) {
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -125,11 +206,19 @@ function LeadRow({ lead, onRemove }: { lead: Interest; onRemove: () => void }) {
 
   return (
     <li className="rounded-xl border bg-card p-3.5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
+      <div className="flex items-start gap-3">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggle}
+          aria-label={`Select ${lead.visitor_name}`}
+          className="mt-1 size-4 shrink-0 accent-foreground"
+        />
+        <div className="min-w-0 flex-1">
           <p className="font-semibold">{lead.visitor_name}</p>
           <p className="text-xs text-muted-foreground">{timeAgo(lead.created_at)}</p>
         </div>
+        <BlockButton contact={lead.contact_handle} onBlocked={onBlocked} />
         <Button variant="ghost" size="icon-sm" onClick={onRemove} aria-label={`Remove ${lead.visitor_name}`}>
           <Trash2 className="text-muted-foreground" />
         </Button>

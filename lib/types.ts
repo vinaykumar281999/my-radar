@@ -16,9 +16,12 @@ export const TIMEFRAMES = [
 
 export const STATUSES = ["Just an Idea", "Booking Soon", "Locked In"] as const;
 
+export const VISIBILITIES = ["public", "unlisted"] as const;
+
 export type Category = (typeof CATEGORIES)[number];
 export type Timeframe = (typeof TIMEFRAMES)[number];
 export type Status = (typeof STATUSES)[number];
+export type Visibility = (typeof VISIBILITIES)[number];
 
 export type Profile = {
   id: string;
@@ -26,6 +29,7 @@ export type Profile = {
   display_name: string;
   bio: string | null;
   avatar_url: string | null;
+  pitches_paused: boolean;
   created_at: string;
 };
 
@@ -39,6 +43,8 @@ export type Plan = {
   status: Status;
   notes: string | null;
   is_archived: boolean;
+  /** "unlisted" plans only show via their direct link (/username/p/id). */
+  visibility: Visibility;
   /** "@handle" or a first name — never a phone number (see publicAttribution). */
   suggested_by_handle: string | null;
   chained_from_plan_id: string | null;
@@ -71,9 +77,23 @@ export type Pitch = {
   created_at: string;
 };
 
+export type BlockedContact = {
+  id: string;
+  owner_id: string;
+  contact_key: string;
+  label: string | null;
+  created_at: string;
+};
+
+/** What block_contact() cleared: dismissed pitches and deleted interests. */
+export type BlockResult = {
+  pitch_ids: string[];
+  interests: { id: string; plan_id: string }[];
+};
+
 export type PlanInput = Pick<
   Plan,
-  "title" | "category" | "timeframe" | "specific_dates" | "status" | "notes"
+  "title" | "category" | "timeframe" | "specific_dates" | "status" | "notes" | "visibility"
 >;
 
 export const USERNAME_RE = /^[a-z0-9_]{3,30}$/;

@@ -21,11 +21,13 @@ import {
   CATEGORIES,
   STATUSES,
   TIMEFRAMES,
+  VISIBILITIES,
   type Category,
   type Plan,
   type PlanInput,
   type Status,
   type Timeframe,
+  type Visibility,
 } from "@/lib/types";
 
 type QuickAddPlanProps = {
@@ -44,7 +46,10 @@ const EMPTY: PlanInput = {
   status: "Just an Idea",
   specific_dates: "",
   notes: "",
+  visibility: "public",
 };
+
+const VISIBILITY_LABELS: Record<Visibility, string> = { public: "Public", unlisted: "Unlisted" };
 
 export function QuickAddPlan({ open, onOpenChange, userId, editing, onSaved }: QuickAddPlanProps) {
   return (
@@ -87,6 +92,7 @@ function PlanForm({
           status: editing.status,
           specific_dates: editing.specific_dates ?? "",
           notes: editing.notes ?? "",
+          visibility: editing.visibility ?? "public",
         }
       : EMPTY,
   );
@@ -113,6 +119,7 @@ function PlanForm({
       status: form.status,
       specific_dates: form.specific_dates?.trim() || null,
       notes: form.notes?.trim() || null,
+      visibility: form.visibility,
     };
 
     const supabase = createClient();
@@ -184,6 +191,21 @@ function PlanForm({
           </>
         )}
       />
+
+      <div className="space-y-1.5">
+        <PillGroup<Visibility>
+          label="Who can see it"
+          options={VISIBILITIES}
+          value={form.visibility}
+          onChange={(v) => set("visibility", v)}
+          renderOption={(v) => VISIBILITY_LABELS[v]}
+        />
+        <p className="text-xs text-muted-foreground">
+          {form.visibility === "public"
+            ? "Shown on your Radar page."
+            : "Hidden from your page. Only people with the plan's direct link can see it."}
+        </p>
+      </div>
 
       <div className="grid gap-3 sm:grid-cols-[1fr_1.5fr]">
         <div className="space-y-1.5">

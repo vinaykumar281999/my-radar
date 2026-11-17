@@ -3,8 +3,10 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { ArrowLeft } from "lucide-react";
 import { ProfileSettings } from "./ProfileSettings";
+import { BlockedList, PausePitches } from "./OwnerControls";
 import { Skeleton } from "@/components/ui/skeleton";
 import { requireProfile } from "@/lib/data/session";
+import type { BlockedContact } from "@/lib/types";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -28,10 +30,19 @@ export default function SettingsPage() {
 }
 
 async function SettingsData() {
-  const { profile } = await requireProfile();
+  const { supabase, profile } = await requireProfile();
+  const { data: blocked, error } = await supabase
+    .from("blocked_contacts")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .returns<BlockedContact[]>();
+  if (error) console.error("settings blocked_contacts", error);
+
   return (
     <div className="mt-6 space-y-6">
       <ProfileSettings profile={profile} />
+      <PausePitches userId={profile.id} initialPaused={profile.pitches_paused} />
+      <BlockedList initialBlocked={blocked ?? []} />
     </div>
   );
 }

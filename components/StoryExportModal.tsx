@@ -33,8 +33,10 @@ export function StoryExportModal({ open, onOpenChange, profile, plans }: StoryEx
   const [pending, setPending] = useState(false);
   const host = useHost();
 
-  const upcoming = sortPlans(plans.filter((p) => !p.is_archived)).slice(0, MAX_PLANS);
-  const more = plans.filter((p) => !p.is_archived).length - upcoming.length;
+  // Only what's on the public page: no archived or unlisted plans.
+  const shareable = plans.filter((p) => !p.is_archived && p.visibility !== "unlisted");
+  const upcoming = sortPlans(shareable).slice(0, MAX_PLANS);
+  const more = shareable.length - upcoming.length;
 
   async function download() {
     if (!ref.current) return;

@@ -112,7 +112,8 @@ async function guarded(
   if (!allowed) return fail("rate_limited");
 
   const { error } = await insert(db);
-  if (!error) return { ok: true };
+  // Blocked senders get the normal success screen; nothing is saved.
+  if (!error || error.message.includes("sender_blocked")) return { ok: true };
 
   for (const known of ["too_many_pitches", "pitches_paused", "plan_unavailable"] as const) {
     if (error.message.includes(known)) return fail(known);

@@ -54,6 +54,13 @@ alter table public.plans
   add column if not exists chained_from_plan_id uuid
     references public.plans (id) on delete set null;
 
+-- Owner controls: unlisted plans only show up via their direct link.
+alter table public.plans
+  add column if not exists visibility text not null default 'public'
+    check (visibility in ('public', 'unlisted'));
+alter table public.profiles
+  add column if not exists pitches_paused boolean not null default false;
+
 -- -----------------------------------------------------------------------------
 -- interests
 -- -----------------------------------------------------------------------------
@@ -131,14 +138,15 @@ create policy "profiles_update_own" on public.profiles
   using (auth.uid() = id)
   with check (auth.uid() = id);
 
--- plans: public read of active plans; owners see (and manage) all of their own
+-- plans: public read of active, public plans (unlisted ones via get_public_plan);
+-- owners see (and manage) all of their own
 drop policy if exists "plans_select_public" on public.plans;
 drop policy if exists "plans_insert_own"    on public.plans;
 drop policy if exists "plans_update_own"    on public.plans;
 drop policy if exists "plans_delete_own"    on public.plans;
 
 create policy "plans_select_public" on public.plans
-  for select using (is_archived = false or auth.uid() = user_id);
+  for select using ((is_archived = false and visibility = 'public') or auth.uid() = user_id);
 
 create policy "plans_insert_own" on public.plans
   for insert to authenticated
@@ -386,6 +394,109 @@ grant execute on function public.username_available(text) to anon, authenticated
 grant execute on function public.resolve_username(text) to anon, authenticated;
 
 -- -----------------------------------------------------------------------------
+-- Blocked senders. Contacts are compared in normalized form, so "@Alex.R",
+-- "alex.r" and "instagram.com/alex.r" are the same person, and phone numbers
+-- compare by digits only.
+-- -----------------------------------------------------------------------------
+create or replace function public.normalize_contact(p_contact text)
+returns text
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  v text := lower(btrim(coalesce(p_contact, '')));
+begin
+  if v ~ '^(https?://)?(www\.)?instagram\.com/' then
+    v := split_part(split_part(regexp_replace(v, '^(https?://)?(www\.)?instagram\.com/', ''), '?', 1), '/', 1);
+  end if;
+  v := ltrim(v, '@');
+  if v ~ '^\+?[0-9 ().-]{7,20}$' then
+    v := regexp_replace(v, '[^0-9]', '', 'g');
+  end if;
+  return v;
+end;
+$$;
+
+create table if not exists public.blocked_contacts (
+  id           uuid primary key default gen_random_uuid(),
+  owner_id     uuid not null references public.profiles (id) on delete cascade,
+  contact_key  text not null check (char_length(contact_key) between 1 and 60),
+  -- the contact as it was written, for the settings list
+  label        text check (label is null or char_length(label) <= 60),
+  created_at   timestamptz not null default now(),
+  unique (owner_id, contact_key)
+);
+
+alter table public.blocked_contacts enable row level security;
+grant select, insert, delete on public.blocked_contacts to authenticated;
+
+drop policy if exists "blocked_select_own" on public.blocked_contacts;
+drop policy if exists "blocked_insert_own" on public.blocked_contacts;
+drop policy if exists "blocked_delete_own" on public.blocked_contacts;
+
+create policy "blocked_select_own" on public.blocked_contacts
+  for select to authenticated using (auth.uid() = owner_id);
+create policy "blocked_insert_own" on public.blocked_contacts
+  for insert to authenticated with check (auth.uid() = owner_id);
+create policy "blocked_delete_own" on public.blocked_contacts
+  for delete to authenticated using (auth.uid() = owner_id);
+
+-- Block a sender and clear what they already sent: dismisses their pending
+-- pitches and deletes their interests on the caller's plans. SECURITY INVOKER,
+-- so RLS limits every statement to the caller's own rows.
+-- Returns {"pitch_ids": [...], "interests": [{"id", "plan_id"}, ...]}.
+create or replace function public.block_contact(p_contact text)
+returns jsonb
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_key       text := public.normalize_contact(p_contact);
+  v_pitches   jsonb;
+  v_interests jsonb;
+begin
+  if auth.uid() is null then
+    raise exception 'not_signed_in' using errcode = '42501';
+  end if;
+  if v_key = '' then
+    raise exception 'invalid_contact' using errcode = '22023';
+  end if;
+
+  insert into public.blocked_contacts (owner_id, contact_key, label)
+  values (auth.uid(), left(v_key, 60), left(btrim(p_contact), 60))
+  on conflict (owner_id, contact_key) do nothing;
+
+  with dismissed as (
+    update public.plan_pitches
+       set status = 'dismissed'
+     where target_user_id = auth.uid()
+       and status = 'pending'
+       and public.normalize_contact(pitcher_handle) = v_key
+    returning id
+  )
+  select coalesce(jsonb_agg(id), '[]'::jsonb) into v_pitches from dismissed;
+
+  with removed as (
+    delete from public.interests i
+     using public.plans p
+     where p.id = i.plan_id
+       and p.user_id = auth.uid()
+       and public.normalize_contact(i.contact_handle) = v_key
+    returning i.id, i.plan_id
+  )
+  select coalesce(jsonb_agg(jsonb_build_object('id', id, 'plan_id', plan_id)), '[]'::jsonb)
+    into v_interests from removed;
+
+  return jsonb_build_object('pitch_ids', v_pitches, 'interests', v_interests);
+end;
+$$;
+
+revoke all on function public.block_contact(text) from public, anon;
+grant execute on function public.block_contact(text) to authenticated;
+
+-- -----------------------------------------------------------------------------
 -- Submission guards. The service role bypasses RLS, so the rules the old
 -- anon INSERT policies enforced live in triggers instead (they also apply to
 -- anything else that writes these tables).
@@ -396,11 +507,21 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  v_owner uuid;
 begin
-  if not exists (
-    select 1 from public.plans p where p.id = new.plan_id and p.is_archived = false
-  ) then
+  select p.user_id into v_owner
+    from public.plans p
+   where p.id = new.plan_id and p.is_archived = false;
+  if not found then
     raise exception 'plan_unavailable' using errcode = 'P0001';
+  end if;
+
+  if exists (
+    select 1 from public.blocked_contacts b
+     where b.owner_id = v_owner and b.contact_key = public.normalize_contact(new.contact_handle)
+  ) then
+    raise exception 'sender_blocked' using errcode = 'P0001';
   end if;
   return new;
 end;
@@ -422,6 +543,20 @@ as $$
 begin
   -- New pitches always start pending.
   new.status := 'pending';
+
+  if exists (
+    select 1 from public.profiles pr where pr.id = new.target_user_id and pr.pitches_paused
+  ) then
+    raise exception 'pitches_paused' using errcode = 'P0001';
+  end if;
+
+  if exists (
+    select 1 from public.blocked_contacts b
+     where b.owner_id = new.target_user_id
+       and b.contact_key = public.normalize_contact(new.pitcher_handle)
+  ) then
+    raise exception 'sender_blocked' using errcode = 'P0001';
+  end if;
   return new;
 end;
 $$;
@@ -477,6 +612,24 @@ end;
 $$;
 
 revoke all on function public.consume_rate_limit(text, int, int) from public, anon, authenticated;
+
+-- -----------------------------------------------------------------------------
+-- One active plan by id, public or unlisted: backs the direct plan link
+-- (/username/p/<id>). Plan ids are random UUIDs, so unlisted plans can't be
+-- listed or guessed; RLS still hides them from list queries.
+-- -----------------------------------------------------------------------------
+create or replace function public.get_public_plan(p_plan_id uuid)
+returns setof public.plans
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select * from public.plans where id = p_plan_id and is_archived = false;
+$$;
+
+revoke all on function public.get_public_plan(uuid) from public;
+grant execute on function public.get_public_plan(uuid) to anon, authenticated;
 
 -- =============================================================================
 -- service_role (server-only key): keep this section last so it covers every

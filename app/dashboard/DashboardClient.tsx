@@ -9,7 +9,9 @@ import {
   Check,
   Copy,
   ExternalLink,
+  EyeOff,
   ImageDown,
+  Link2,
   Lightbulb,
   LogOut,
   Pencil,
@@ -31,7 +33,7 @@ import { copyText } from "@/components/ShareButton";
 import { useOrigin } from "@/hooks/use-origin";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { STATUSES, sortPlans, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
+import { STATUSES, sortPlans, type BlockResult, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
 
 type DashboardClientProps = {
   profile: Profile;
@@ -44,6 +46,8 @@ export function DashboardClient({ profile, initialPlans, initialPitches }: Dashb
   const [composerOpen, setComposerOpen] = useState(false);
   const [editing, setEditing] = useState<Plan | null>(null);
   const [leadsPlan, setLeadsPlan] = useState<Plan | null>(null);
+  // Bumped on every open so search/selection start fresh (without remounting on close).
+  const [leadsKey, setLeadsKey] = useState(0);
   const [storyOpen, setStoryOpen] = useState(false);
   const [pitches, setPitches] = useState<Pitch[]>(initialPitches);
   const [pitchesOpen, setPitchesOpen] = useState(false);
@@ -62,6 +66,15 @@ export function DashboardClient({ profile, initialPlans, initialPitches }: Dashb
       setCopied(true);
       toast.success("Bio link copied — paste it in your Instagram bio");
       setTimeout(() => setCopied(false), 2000);
+    } else {
+      toast.error("Couldn't copy the link");
+    }
+  }
+
+  async function copyPlanLink(plan: Plan) {
+    const url = `${window.location.origin}${publicPath}/p/${plan.id}`;
+    if (await copyText(url)) {
+      toast.success(plan.visibility === "unlisted" ? "Private link copied — only people with it can see this plan" : "Plan link copied");
     } else {
       toast.error("Couldn't copy the link");
     }
@@ -113,6 +126,20 @@ export function DashboardClient({ profile, initialPlans, initialPitches }: Dashb
   const onCountChange = useCallback((planId: string, count: number) => {
     setPlans((ps) => ps.map((p) => (p.id === planId && p.interest_count !== count ? { ...p, interest_count: count } : p)));
   }, []);
+
+  /** Blocking a sender clears their pitches and their interests on every plan. */
+  function onBlocked({ pitch_ids, interests }: BlockResult) {
+    setPitches((ps) => ps.filter((p) => !pitch_ids.includes(p.id)));
+    const removedPerPlan = new Map<string, number>();
+    interests.forEach((i) => removedPerPlan.set(i.plan_id, (removedPerPlan.get(i.plan_id) ?? 0) + 1));
+    setPlans((ps) =>
+      ps.map((p) =>
+        removedPerPlan.has(p.id)
+          ? { ...p, interest_count: Math.max(0, p.interest_count - removedPerPlan.get(p.id)!) }
+          : p,
+      ),
+    );
+  }
 
   return (
     <main className="mx-auto w-full max-w-2xl px-4 pt-4 pb-28">
@@ -234,7 +261,11 @@ export function DashboardClient({ profile, initialPlans, initialPitches }: Dashb
                 onEdit={() => openEdit(plan)}
                 onArchive={() => patchPlan(plan.id, { is_archived: true }, "Archived — hidden from your page")}
                 onDelete={() => deletePlan(plan.id)}
-                onLeads={() => setLeadsPlan(plan)}
+                onLeads={() => {
+                  setLeadsKey((k) => k + 1);
+                  setLeadsPlan(plan);
+                }}
+                onCopyLink={() => copyPlanLink(plan)}
               />
             ))}
           </ul>
@@ -288,10 +319,17 @@ export function DashboardClient({ profile, initialPlans, initialPitches }: Dashb
         open={pitchesOpen}
         onOpenChange={setPitchesOpen}
         pitches={pitches}
-        onResolved={(id) => setPitches((ps) => ps.filter((p) => p.id !== id))}
+        onResolved={(ids) => setPitches((ps) => ps.filter((p) => !ids.includes(p.id)))}
         onPlanAdded={onSaved}
+        onBlocked={onBlocked}
       />
-      <LeadsDrawer plan={leadsPlan} onOpenChange={(o) => !o && setLeadsPlan(null)} onCountChange={onCountChange} />
+      <LeadsDrawer
+        key={leadsKey}
+        plan={leadsPlan}
+        onOpenChange={(o) => !o && setLeadsPlan(null)}
+        onCountChange={onCountChange}
+        onBlocked={onBlocked}
+      />
       <StoryExportModal open={storyOpen} onOpenChange={setStoryOpen} profile={profile} plans={plans} />
     </main>
   );
@@ -304,9 +342,10 @@ type ManagePlanRowProps = {
   onArchive: () => void;
   onDelete: () => void;
   onLeads: () => void;
+  onCopyLink: () => void;
 };
 
-function ManagePlanRow({ plan, onStatus, onEdit, onArchive, onDelete, onLeads }: ManagePlanRowProps) {
+function ManagePlanRow({ plan, onStatus, onEdit, onArchive, onDelete, onLeads, onCopyLink }: ManagePlanRowProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
@@ -326,7 +365,14 @@ function ManagePlanRow({ plan, onStatus, onEdit, onArchive, onDelete, onLeads }:
             {plan.timeframe}
             {plan.specific_dates && ` · ${plan.specific_dates}`}
           </p>
-          <ChainPill plan={plan} className="mt-1.5" />
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {plan.visibility === "unlisted" && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-foreground px-2 py-0.5 text-[11px] font-semibold text-background">
+                <EyeOff className="size-3" /> Unlisted
+              </span>
+            )}
+            <ChainPill plan={plan} />
+          </div>
         </div>
         <button
           type="button"
@@ -367,9 +413,12 @@ function ManagePlanRow({ plan, onStatus, onEdit, onArchive, onDelete, onLeads }:
         })}
       </div>
 
-      <div className="mt-3 flex items-center gap-1 border-t pt-3">
+      <div className="mt-3 flex flex-wrap items-center gap-1 border-t pt-3">
         <Button variant="ghost" size="sm" onClick={onEdit}>
           <Pencil /> Edit
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onCopyLink} aria-label="Copy plan link">
+          <Link2 /> Link
         </Button>
         <Button variant="ghost" size="sm" onClick={onArchive}>
           <Archive /> Archive

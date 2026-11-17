@@ -103,9 +103,11 @@ async function RadarContent({ params }: { params: PageProps<"/[username]">["para
         </div>
       )}
 
-      <div className="mt-8">
-        <PitchPrompt targetUserId={profile.id} hostName={profile.display_name} />
-      </div>
+      {!profile.pitches_paused && (
+        <div className="mt-8">
+          <PitchPrompt targetUserId={profile.id} hostName={profile.display_name} />
+        </div>
+      )}
     </ViewerProvider>
   );
 }
