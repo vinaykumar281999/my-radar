@@ -3,14 +3,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { Radar as RadarIcon } from "lucide-react";
-import { PlanCard } from "@/components/PlanCard";
+import { RadarFeed, SharedSignInPrompt } from "@/components/RadarFeed";
 import { PitchPrompt } from "@/components/PitchModal";
 import { ViewerProvider } from "@/components/ViewerContext";
 import { ShareButton } from "@/components/ShareButton";
 import { Avatar } from "@/components/Avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getPublicRadar } from "@/lib/data/public";
-import { groupByTimeframe } from "@/lib/types";
 
 export async function generateMetadata({ params }: PageProps<"/[username]">): Promise<Metadata> {
   const { username } = await params;
@@ -57,7 +56,6 @@ async function RadarContent({ params }: { params: PageProps<"/[username]">["para
   if (!radar) notFound();
 
   const { profile, plans } = radar;
-  const groups = groupByTimeframe(plans);
 
   return (
     <ViewerProvider>
@@ -69,45 +67,19 @@ async function RadarContent({ params }: { params: PageProps<"/[username]">["para
         <ShareButton path={`/${profile.username}`} title={`${profile.display_name}'s Radar`} className="mt-4" />
       </header>
 
-      {groups.length === 0 ? (
-        <div className="tap-card mt-8 px-6 py-10 text-center">
-          <p className="text-3xl">🛰️</p>
-          <p className="mt-3 font-semibold">Nothing on the radar yet</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {profile.display_name.split(" ")[0]} hasn&apos;t posted any plans. Check back soon!
-          </p>
-        </div>
-      ) : (
-        <div className="mt-8 space-y-8">
-          {groups.map((group) => (
-            <section key={group.timeframe} aria-labelledby={`tf-${group.timeframe}`}>
-              <h2
-                id={`tf-${group.timeframe}`}
-                className="mb-3 flex items-center gap-2 text-xs font-bold tracking-widest text-muted-foreground uppercase"
-              >
-                {group.timeframe}
-                <span className="h-px flex-1 bg-border" />
-              </h2>
-              <div className="space-y-3">
-                {group.plans.map((plan) => (
-                  <PlanCard
-                    key={plan.id}
-                    plan={plan}
-                    hostName={profile.display_name}
-                    hostUsername={profile.username}
-                  />
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      )}
+      <RadarFeed
+        ownerId={profile.id}
+        hostName={profile.display_name}
+        hostUsername={profile.username}
+        publicPlans={plans}
+      />
 
       {!profile.pitches_paused && (
         <div className="mt-8">
           <PitchPrompt targetUserId={profile.id} hostName={profile.display_name} />
         </div>
       )}
+      <SharedSignInPrompt next={`/${profile.username}`} className="mt-6 text-center" />
     </ViewerProvider>
   );
 }

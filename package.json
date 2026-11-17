@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test:db": "bash scripts/test-db.sh",
-    "test:unit": "node scripts/test-unit.mjs"
+    "test:unit": "node scripts/test-unit.mjs",
+    "test:leaks": "node --env-file=.env.local scripts/leak-test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

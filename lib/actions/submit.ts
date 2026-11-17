@@ -3,6 +3,7 @@
 import { createHmac } from "node:crypto";
 import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import { verifyTurnstile } from "@/lib/turnstile";
 import { CATEGORIES, TIMEFRAMES, type Category, type Timeframe } from "@/lib/types";
 
@@ -56,9 +57,16 @@ export async function submitInterest(input: InterestInput): Promise<SubmitResult
   const message = text(input.message, 280);
   if (!planId || !name || !contact) return fail("invalid");
 
-  return guarded(input, async (db) =>
-    db.from("interests").insert({ plan_id: planId, visitor_name: name, contact_handle: contact, message }),
-  );
+  return guarded(input, async (db) => {
+    // Who is sending, from their own session (never from the request body).
+    // Circle plans only accept signed-in members: guard_interest checks this
+    // user against the plan's circles and answers plan_unavailable otherwise,
+    // the same as for a plan that doesn't exist.
+    const userId = await signedInProfileId(db);
+    return db
+      .from("interests")
+      .insert({ plan_id: planId, visitor_name: name, contact_handle: contact, message, user_id: userId });
+  });
 }
 
 export async function submitPitch(input: PitchInput): Promise<SubmitResult> {
@@ -119,6 +127,8 @@ async function guarded(
   const { error } = await insert(db);
   // Blocked senders get the normal success screen; nothing is saved.
   if (!error || error.message.includes("sender_blocked")) return { ok: true };
+  // A signed-in user already sent interest for this plan: nothing new to save.
+  if (error.code === "23505" && error.message.includes("interests_plan_user_key")) return { ok: true };
 
   for (const known of ["too_many_pitches", "pitches_paused", "plan_unavailable"] as const) {
     if (error.message.includes(known)) return fail(known);
@@ -127,6 +137,16 @@ async function guarded(
   if (error.code === "23503") return fail("plan_unavailable");
   console.error("submission insert", error);
   return fail("server");
+}
+
+/** The caller's profile id if they're signed in and onboarded, else null. */
+async function signedInProfileId(db: ReturnType<typeof createAdminClient>) {
+  const {
+    data: { user },
+  } = await (await createClient()).auth.getUser();
+  if (!user) return null;
+  const { data } = await db.from("profiles").select("id").eq("id", user.id).maybeSingle<{ id: string }>();
+  return data?.id ?? null;
 }
 
 function fail(error: SubmitError): SubmitResult {

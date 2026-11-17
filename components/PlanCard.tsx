@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarDays, Check, CopyPlus, Loader2 } from "lucide-react";
+import { CalendarDays, Check, CopyPlus, Loader2, UsersRound } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { CategoryLabel, ChainPill, StatusPill } from "@/components/plan-meta";
@@ -22,10 +22,12 @@ type PlanCardProps = {
   /** Host's username — enables "Copy to my Radar" attribution. */
   hostUsername?: string;
   demo?: boolean;
+  /** Viewer's circles this plan is shared with ("Shared with you · College"). */
+  sharedVia?: string[];
   className?: string;
 };
 
-export function PlanCard({ plan, hostName, hostUsername, demo, className }: PlanCardProps) {
+export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, className }: PlanCardProps) {
   const [open, setOpen] = useState(false);
   const viewer = useViewer();
   const canCopy = canCopyPlan(plan, viewer?.id ?? null, { demo, hostUsername });
@@ -36,6 +38,13 @@ export function PlanCard({ plan, hostName, hostUsername, demo, className }: Plan
         <CategoryLabel category={plan.category} />
         <StatusPill status={plan.status} />
       </div>
+
+      {sharedVia && (
+        <p className="mt-2 inline-flex max-w-full items-center gap-1 truncate rounded-full bg-foreground px-2 py-0.5 text-[11px] font-semibold text-background">
+          <UsersRound className="size-3 shrink-0" />
+          Shared with you{sharedVia.length > 0 && ` · ${sharedVia.join(", ")}`}
+        </p>
+      )}
 
       <h3 className="mt-2 text-lg leading-snug font-bold tracking-tight text-balance">{plan.title}</h3>
 

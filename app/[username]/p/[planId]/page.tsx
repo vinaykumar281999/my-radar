@@ -7,12 +7,14 @@ import { PlanCard } from "@/components/PlanCard";
 import { ViewerProvider } from "@/components/ViewerContext";
 import { Avatar } from "@/components/Avatar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getPublicPlan } from "@/lib/data/public";
+import { getPublicPlan, getPublicProfile } from "@/lib/data/public";
+import { SharedPlanFallback } from "./SharedPlanFallback";
 
 export async function generateMetadata({ params }: PageProps<"/[username]/p/[planId]">): Promise<Metadata> {
   const { username, planId } = await params;
   const found = await getPublicPlan(username, planId);
-  if (!found) return { title: "Plan not found" };
+  // Circle plans never reach this (anonymous) read, so their titles can't leak into link previews.
+  if (!found) return { title: "Plan not available", robots: { index: false, follow: false } };
 
   const { profile, plan } = found;
   const description = plan.notes ?? `${profile.display_name} is planning this. Tap “I'm Interested” to get in.`;
@@ -47,19 +49,29 @@ export default function PlanPage({ params }: PageProps<"/[username]/p/[planId]">
 async function PlanContent({ params }: { params: PageProps<"/[username]/p/[planId]">["params"] }) {
   const { username, planId } = await params;
   const found = await getPublicPlan(username, planId);
-  if (!found) notFound();
+
+  if (!found) {
+    const profile = await getPublicProfile(username);
+    if (!profile) notFound();
+    // Missing, archived, or a circle plan: identical server output either way.
+    return (
+      <ViewerProvider>
+        <ProfileLink username={profile.username} displayName={profile.display_name} avatarUrl={profile.avatar_url} />
+        <SharedPlanFallback
+          planId={planId}
+          ownerId={profile.id}
+          hostName={profile.display_name}
+          hostUsername={profile.username}
+        />
+      </ViewerProvider>
+    );
+  }
 
   const { profile, plan } = found;
 
   return (
     <ViewerProvider>
-      <Link href={`/${profile.username}`} className="flex items-center gap-3">
-        <Avatar name={profile.display_name} src={profile.avatar_url} className="size-10 text-sm" />
-        <span className="min-w-0">
-          <span className="block truncate font-bold">{profile.display_name}</span>
-          <span className="block text-sm text-muted-foreground">@{profile.username}</span>
-        </span>
-      </Link>
+      <ProfileLink username={profile.username} displayName={profile.display_name} avatarUrl={profile.avatar_url} />
       <PlanCard plan={plan} hostName={profile.display_name} hostUsername={profile.username} className="mt-5" />
       <Link
         href={`/${profile.username}`}
@@ -68,6 +80,26 @@ async function PlanContent({ params }: { params: PageProps<"/[username]/p/[planI
         See {profile.display_name.split(" ")[0]}&apos;s other plans <ArrowRight className="size-3.5" />
       </Link>
     </ViewerProvider>
+  );
+}
+
+function ProfileLink({
+  username,
+  displayName,
+  avatarUrl,
+}: {
+  username: string;
+  displayName: string;
+  avatarUrl: string | null;
+}) {
+  return (
+    <Link href={`/${username}`} className="flex items-center gap-3">
+      <Avatar name={displayName} src={avatarUrl} className="size-10 text-sm" />
+      <span className="min-w-0">
+        <span className="block truncate font-bold">{displayName}</span>
+        <span className="block text-sm text-muted-foreground">@{username}</span>
+      </span>
+    </Link>
   );
 }
 
