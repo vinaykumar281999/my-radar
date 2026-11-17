@@ -64,6 +64,12 @@ alter table public.profiles
 -- Calendar: optional real dates (all-day, inclusive). timeframe stays for fuzzy plans.
 alter table public.plans add column if not exists start_date date;
 alter table public.plans add column if not exists end_date date;
+-- Spots: optional capacity. Taken spots are never stored; they're always
+-- count(interests where status = 'approved'), so declining, deleting or
+-- blocking an approved person frees their spot with no bookkeeping.
+alter table public.plans
+  add column if not exists capacity int check (capacity is null or capacity between 1 and 50);
+
 alter table public.plans drop constraint if exists plans_dates_order;
 alter table public.plans add constraint plans_dates_order
   check (end_date is null or (start_date is not null and end_date >= start_date));
@@ -175,6 +181,12 @@ alter table public.interests
   add column if not exists user_id uuid references public.profiles (id) on delete set null;
 create unique index if not exists interests_plan_user_key
   on public.interests (plan_id, user_id) where user_id is not null;
+
+-- 'interested' for plans without capacity; spot requests go pending -> approved / declined.
+alter table public.interests
+  add column if not exists status text not null default 'interested'
+    check (status in ('interested', 'pending', 'approved', 'declined'));
+create index if not exists interests_plan_status_idx on public.interests (plan_id, status);
 
 -- Helpers below are SECURITY DEFINER so RLS policies can use them without
 -- recursing through each other's policies. The ones callable by clients only
@@ -319,6 +331,11 @@ create policy "plans_delete_own" on public.plans
 drop policy if exists "interests_insert_anyone"  on public.interests;
 drop policy if exists "interests_select_owner"   on public.interests;
 drop policy if exists "interests_delete_owner"   on public.interests;
+
+drop policy if exists "interests_select_own_request" on public.interests;
+-- A signed-in requester can read their own request (to see Pending / Approved).
+create policy "interests_select_own_request" on public.interests
+  for select to authenticated using (user_id = auth.uid());
 
 create policy "interests_select_owner" on public.interests
   for select to authenticated
@@ -664,8 +681,9 @@ as $$
 declare
   v_owner      uuid;
   v_visibility text;
+  v_capacity   int;
 begin
-  select p.user_id, p.visibility into v_owner, v_visibility
+  select p.user_id, p.visibility, p.capacity into v_owner, v_visibility, v_capacity
     from public.plans p
    where p.id = new.plan_id and p.is_archived = false;
   if not found then
@@ -677,6 +695,17 @@ begin
   if v_visibility = 'circles'
      and (new.user_id is null or not public.can_user_see_plan(new.plan_id, new.user_id)) then
     raise exception 'plan_unavailable' using errcode = 'P0001';
+  end if;
+
+  -- Status is never chosen by the sender: a request on a plan with spots
+  -- starts pending (and is refused once it's full), otherwise it's interest.
+  if v_capacity is not null then
+    if (select count(*) from public.interests i where i.plan_id = new.plan_id and i.status = 'approved') >= v_capacity then
+      raise exception 'plan_full' using errcode = 'P0001';
+    end if;
+    new.status := 'pending';
+  else
+    new.status := 'interested';
   end if;
 
   if exists (
@@ -1126,6 +1155,130 @@ drop trigger if exists plans_guard_copy on public.plans;
 create trigger plans_guard_copy
   before insert or update of chained_from_plan_id on public.plans
   for each row execute function public.guard_plan_copy();
+
+-- -----------------------------------------------------------------------------
+-- Spots: approve / decline requests. SECURITY DEFINER with an explicit owner
+-- check, because nobody (owners included) may update interests directly.
+-- -----------------------------------------------------------------------------
+revoke update on public.interests from anon, authenticated;
+
+create or replace function public.approve_spot(p_interest_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_plan_id  uuid;
+  v_capacity int;
+  v_status   text;
+  v_taken    int;
+begin
+  select i.plan_id into v_plan_id from public.interests i where i.id = p_interest_id;
+  if not found then
+    raise exception 'request_not_found' using errcode = 'P0002';
+  end if;
+
+  -- Lock the plan row first: concurrent approvals for this plan queue here, and
+  -- each one counts only after the previous one committed. That's what makes
+  -- overbooking impossible.
+  select p.capacity into v_capacity
+    from public.plans p
+   where p.id = v_plan_id and p.user_id = auth.uid()
+     for update;
+  if not found then
+    raise exception 'request_not_found' using errcode = 'P0002';  -- not your plan: same answer
+  end if;
+  if v_capacity is null then
+    raise exception 'plan_has_no_spots' using errcode = 'P0001';
+  end if;
+
+  select i.status into v_status from public.interests i where i.id = p_interest_id for update;
+  if not found then
+    raise exception 'request_not_found' using errcode = 'P0002';  -- deleted while we waited
+  end if;
+  if v_status = 'approved' then
+    select count(*) into v_taken from public.interests where plan_id = v_plan_id and status = 'approved';
+    return jsonb_build_object('taken', v_taken, 'capacity', v_capacity);
+  end if;
+
+  select count(*) into v_taken from public.interests where plan_id = v_plan_id and status = 'approved';
+  if v_taken >= v_capacity then
+    raise exception 'plan_full' using errcode = 'P0001';
+  end if;
+
+  update public.interests set status = 'approved' where id = p_interest_id;
+  return jsonb_build_object('taken', v_taken + 1, 'capacity', v_capacity);
+end;
+$$;
+
+-- Decline a request, or take back an approval (which frees the spot).
+create or replace function public.decline_spot(p_interest_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  update public.interests i
+     set status = 'declined'
+    from public.plans p
+   where i.id = p_interest_id and p.id = i.plan_id and p.user_id = auth.uid() and p.capacity is not null;
+  if not found then
+    raise exception 'request_not_found' using errcode = 'P0002';
+  end if;
+end;
+$$;
+
+revoke all on function public.approve_spot(uuid) from public, anon;
+revoke all on function public.decline_spot(uuid) from public, anon;
+grant execute on function public.approve_spot(uuid) to authenticated;
+grant execute on function public.decline_spot(uuid) to authenticated;
+
+-- Taken / total spots for plans the caller can see (anon included, for public
+-- and unlisted plans). Plans they can't see are simply left out.
+create or replace function public.plan_spots(p_plan_ids uuid[])
+returns table (plan_id uuid, capacity int, taken int)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select p.id, p.capacity,
+         (select count(*)::int from public.interests i where i.plan_id = p.id and i.status = 'approved')
+    from public.plans p
+   where p.id = any (p_plan_ids)
+     and p.capacity is not null
+     and public.can_user_see_plan(p.id, auth.uid());
+$$;
+
+revoke all on function public.plan_spots(uuid[]) from public;
+grant execute on function public.plan_spots(uuid[]) to anon, authenticated;
+
+-- Capacity can't drop below the people already approved. The plan row is
+-- already locked by this UPDATE, so it can't race an approval.
+create or replace function public.guard_capacity()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.capacity is not null
+     and new.capacity is distinct from old.capacity
+     and (select count(*) from public.interests where plan_id = new.id and status = 'approved') > new.capacity then
+    raise exception 'capacity_below_approved' using errcode = 'P0001';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.guard_capacity() from public, anon, authenticated;
+
+drop trigger if exists plans_guard_capacity on public.plans;
+create trigger plans_guard_capacity
+  before update of capacity on public.plans
+  for each row execute function public.guard_capacity();
 
 -- =============================================================================
 -- service_role (server-only key): keep this section last so it covers every
