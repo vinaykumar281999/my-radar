@@ -4,7 +4,7 @@ import { DashboardClient } from "./DashboardClient";
 import type { ViewAsMember } from "@/components/ViewAsDrawer";
 import { Skeleton } from "@/components/ui/skeleton";
 import { requireProfile } from "@/lib/data/session";
-import type { Circle, JoinNotice, Pitch, Plan, PlanWithCount } from "@/lib/types";
+import type { Circle, CircleOption, CircleSettings, JoinNotice, Pitch, Plan, PlanWithCount } from "@/lib/types";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
@@ -26,6 +26,7 @@ async function DashboardData() {
     { data: circles, error: circlesError },
     { data: audiences, error: audiencesError },
     { data: members, error: membersError },
+    { data: circleSettings, error: settingsError },
   ] = await Promise.all([
     supabase
       .from("plans")
@@ -62,6 +63,12 @@ async function DashboardData() {
       .select("circle_id, user_id, circles!inner(owner_id), profiles!circle_members_user_id_fkey(username, display_name)")
       .eq("circles.owner_id", profile.id)
       .returns<CircleMemberRow[]>(),
+    // Owner-only per-circle defaults for the plan form (RLS).
+    supabase
+      .from("circle_settings")
+      .select("circle_id, preselect_for_new_plans, default_capacity")
+      .eq("owner_id", profile.id)
+      .returns<Pick<CircleSettings, "circle_id" | "preselect_for_new_plans" | "default_capacity">[]>(),
   ]);
 
   if (error) console.error("dashboard plans", error);
@@ -70,6 +77,12 @@ async function DashboardData() {
   if (circlesError) console.error("dashboard circles", circlesError);
   if (audiencesError) console.error("dashboard audiences", audiencesError);
   if (membersError) console.error("dashboard members", membersError);
+  if (settingsError) console.error("dashboard circle settings", settingsError);
+
+  const circleOptions: CircleOption[] = (circles ?? []).map((c) => {
+    const s = (circleSettings ?? []).find((x) => x.circle_id === c.id);
+    return { ...c, preselect_for_new_plans: s?.preselect_for_new_plans ?? false, default_capacity: s?.default_capacity ?? null };
+  });
 
   // One entry per person, with every circle of mine they're in.
   const viewAs = new Map<string, ViewAsMember>();
@@ -100,7 +113,7 @@ async function DashboardData() {
       initialPlans={plans}
       initialPitches={pitches ?? []}
       initialJoinNotices={notices ?? []}
-      circles={circles ?? []}
+      circles={circleOptions}
       initialAudiences={audienceByPlan}
       viewAsMembers={[...viewAs.values()].sort((a, b) => a.username.localeCompare(b.username))}
     />

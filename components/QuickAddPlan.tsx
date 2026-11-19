@@ -31,11 +31,11 @@ import {
   type Status,
   type Timeframe,
   type Visibility,
-  type Circle,
+  type CircleOption,
   type PlanPrivateDetails,
 } from "@/lib/types";
 import { localTimeZone, utcToZonedInput, zonedInputToUtc } from "@/lib/dates";
-import { withCategory } from "@/lib/plan-form";
+import { circleDefaultCapacity, preselectedCircleIds, withCategory } from "@/lib/plan-form";
 import { PLAN_TEMPLATES, applyTemplate, type PlanTemplate } from "@/lib/templates";
 
 type QuickAddPlanProps = {
@@ -44,8 +44,8 @@ type QuickAddPlanProps = {
   userId: string;
   /** When set, the form edits this plan instead of creating a new one. */
   editing?: Plan | null;
-  /** The owner's circles, for the "Circles" audience. */
-  circles: Pick<Circle, "id" | "name">[];
+  /** The owner's circles (with their owner-only defaults), for the "Circles" audience. */
+  circles: CircleOption[];
   /** Circles the edited plan is currently shared with. */
   editingCircleIds?: string[];
   onSaved: (plan: Plan, circleIds: string[]) => void;
@@ -119,7 +119,7 @@ function PlanForm({
 }: {
   userId: string;
   editing: Plan | null;
-  circles: Pick<Circle, "id" | "name">[];
+  circles: CircleOption[];
   initialCircleIds: string[];
   onSaved: (plan: Plan, circleIds: string[]) => void;
 }) {
@@ -145,6 +145,13 @@ function PlanForm({
       : EMPTY,
   );
   const [circleIds, setCircleIds] = useState<string[]>(initialCircleIds);
+  // Circle defaults (new plans only): preselected circles are ticked the first
+  // time the owner picks "Circles" themselves; a lone circle's default spots
+  // fill in until the owner sets spots. Visibility is never changed for them.
+  const [preselectApplied, setPreselectApplied] = useState(!!editing);
+  const [capacitySource, setCapacitySource] = useState<"user" | "circle" | "none">(
+    editing?.capacity != null ? "user" : "none",
+  );
   // Carpool departure, as typed: a wall time in `tz` (the zone it was first entered in).
   const [tz] = useState(() => editing?.departs_tz ?? localTimeZone());
   const [departure, setDeparture] = useState(() =>
@@ -189,13 +196,52 @@ function PlanForm({
 
   function setCategory(category: Category) {
     // Safety default (see withCategory): a new carpool starts shared with circles only.
+    // That automatic switch doesn't tick preselected circles: the owner still picks.
     setForm((f) => withCategory(f, category, !editing));
+    if (category === "Carpool" && capacitySource === "circle") clearCircleCapacity();
+  }
+
+  function setUserCapacity(capacity: number | null) {
+    set("capacity", capacity);
+    setCapacitySource(capacity == null ? "none" : "user");
+  }
+
+  function clearCircleCapacity() {
+    set("capacity", null);
+    setCapacitySource("none");
+  }
+
+  /** Suggest the lone selected circle's default spots, unless the owner set spots. */
+  function syncCircleCapacity(ids: string[], visibility: Visibility) {
+    if (editing || isCarpool || capacitySource === "user") return;
+    const suggested = visibility === "circles" ? circleDefaultCapacity(ids, circles) : null;
+    if (suggested != null) {
+      set("capacity", suggested);
+      setCapacitySource("circle");
+    } else if (capacitySource === "circle") {
+      clearCircleCapacity();
+    }
+  }
+
+  function setVisibility(visibility: Visibility) {
+    set("visibility", visibility);
+    let ids = circleIds;
+    if (visibility === "circles" && !preselectApplied) {
+      setPreselectApplied(true);
+      if (circleIds.length === 0) {
+        ids = preselectedCircleIds(circles);
+        setCircleIds(ids);
+      }
+    }
+    syncCircleCapacity(ids, visibility);
   }
 
   // Fills fields only; nothing is saved until "Post plan". The category goes
   // through the same withCategory() rule as tapping a category pill.
   function pickTemplate(template: PlanTemplate) {
     setForm((f) => applyTemplate(f, template));
+    // A template's spots count as chosen; if it has none, a circle default may apply again.
+    setCapacitySource(template.fields.capacity != null ? "user" : "none");
     setError(null);
   }
 
@@ -314,7 +360,9 @@ function PlanForm({
   }
 
   function toggleCircle(id: string) {
-    setCircleIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
+    const next = circleIds.includes(id) ? circleIds.filter((x) => x !== id) : [...circleIds, id];
+    setCircleIds(next);
+    syncCircleCapacity(next, form.visibility);
   }
 
   return (
@@ -377,7 +425,7 @@ function PlanForm({
           onChange={(change) => {
             if ("origin" in change) set("origin", change.origin ?? "");
             if ("destination" in change) set("destination", change.destination ?? "");
-            if ("seats" in change) set("capacity", change.seats ?? null);
+            if ("seats" in change) setUserCapacity(change.seats ?? null);
             if ("departure" in change) setDeparture(change.departure ?? "");
             if ("pickup" in change || "contact" in change || "note" in change) {
               setPrivateDetails((d) => ({ ...d, ...change }));
@@ -410,7 +458,7 @@ function PlanForm({
           label="Who can see it"
           options={VISIBILITIES}
           value={form.visibility}
-          onChange={(v) => set("visibility", v)}
+          onChange={setVisibility}
           renderOption={(v) => VISIBILITY_LABELS[v]}
         />
         <p className="text-xs text-muted-foreground">{VISIBILITY_HINTS[form.visibility]}</p>
@@ -525,14 +573,16 @@ function PlanForm({
               value={form.capacity ?? ""}
               onChange={(e) => {
                 const n = Number.parseInt(e.target.value, 10);
-                set("capacity", Number.isNaN(n) ? null : Math.min(50, Math.max(1, n)));
+                setUserCapacity(Number.isNaN(n) ? null : Math.min(50, Math.max(1, n)));
               }}
               placeholder="No limit"
               className="h-11 w-28 text-base"
             />
             <p className="text-xs text-muted-foreground">
               {form.capacity
-                ? `“I'm Interested” becomes “Request a spot”. You approve up to ${form.capacity}.`
+                ? `“I'm Interested” becomes “Request a spot”. You approve up to ${form.capacity}.${
+                    capacitySource === "circle" ? " (This circle's default.)" : ""
+                  }`
                 : "Set a number to approve who gets a spot."}
             </p>
           </div>

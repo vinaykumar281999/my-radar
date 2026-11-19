@@ -8,7 +8,7 @@ import { CalendarFeed } from "./CalendarFeed";
 import { CirclesSettings, MEMBER_SELECT, type Membership, type OwnedCircle } from "./CirclesSettings";
 import { Skeleton } from "@/components/ui/skeleton";
 import { requireProfile } from "@/lib/data/session";
-import type { BlockedContact, Circle, CircleInvite, CircleMember } from "@/lib/types";
+import type { BlockedContact, Circle, CircleInvite, CircleMember, CircleSettings } from "@/lib/types";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -73,17 +73,20 @@ async function loadCircles(supabase: Supabase, userId: string) {
   if (joinedError) console.error("settings memberships", joinedError);
 
   const ids = (owned ?? []).map((c) => c.id);
-  const [{ data: members }, { data: invites }] = ids.length
+  const [{ data: members }, { data: invites }, { data: settings }] = ids.length
     ? await Promise.all([
         supabase.from("circle_members").select(MEMBER_SELECT).in("circle_id", ids).order("added_at").returns<CircleMember[]>(),
         supabase.from("circle_invites").select("*").in("circle_id", ids).order("created_at").returns<CircleInvite[]>(),
+        // Owner-only (RLS).
+        supabase.from("circle_settings").select("*").in("circle_id", ids).returns<CircleSettings[]>(),
       ])
-    : [{ data: [] as CircleMember[] }, { data: [] as CircleInvite[] }];
+    : [{ data: [] as CircleMember[] }, { data: [] as CircleInvite[] }, { data: [] as CircleSettings[] }];
 
   const circles: OwnedCircle[] = (owned ?? []).map((c) => ({
     ...c,
     members: (members ?? []).filter((m) => m.circle_id === c.id),
     invites: (invites ?? []).filter((i) => i.circle_id === c.id),
+    settings: (settings ?? []).find((s) => s.circle_id === c.id) ?? null,
   }));
   const memberships: Membership[] = (joined ?? []).map((j) => ({
     circle_id: j.circle_id,

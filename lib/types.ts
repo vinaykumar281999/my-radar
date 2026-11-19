@@ -152,6 +152,21 @@ export type Circle = {
   created_at: string;
 };
 
+/** Owner-only per-circle defaults (RLS: nobody else can read them). */
+export type CircleSettings = {
+  circle_id: string;
+  owner_id: string;
+  preselect_for_new_plans: boolean;
+  default_capacity: number | null;
+  default_invite_days: number;
+  /** null = app default (25); 500 = no limit. */
+  default_invite_max_uses: number | null;
+};
+
+/** What the plan form needs to know about each of the owner's circles. */
+export type CircleOption = Pick<Circle, "id" | "name"> &
+  Partial<Pick<CircleSettings, "preselect_for_new_plans" | "default_capacity">>;
+
 export type CircleMember = {
   circle_id: string;
   user_id: string;

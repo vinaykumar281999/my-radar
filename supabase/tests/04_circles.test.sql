@@ -219,6 +219,39 @@ insert into interests (plan_id, visitor_name, contact_handle) values (:P_UNLISTE
 select t.ok(true, 'interest: unlisted still accepts signed-out interest');
 reset role;
 
+-- ===== Circle settings: owner only =====
+set role authenticated; select t.as_user(:A);
+insert into circle_settings (circle_id, owner_id, preselect_for_new_plans, default_capacity, default_invite_days, default_invite_max_uses)
+  values (:COLLEGE, :A, true, 6, 30, 5);
+select t.eq((select default_capacity from circle_settings where circle_id = :COLLEGE), 6, 'owner reads their circle settings');
+update circle_settings set default_capacity = 8 where circle_id = :COLLEGE;
+select t.eq((select default_capacity from circle_settings where circle_id = :COLLEGE), 8, 'owner updates their circle settings');
+select t.throws($$insert into circle_settings (circle_id, owner_id) values ('c3c3c3c3-0000-0000-0000-000000000003', 'aaaaaaaa-0000-0000-0000-00000000000a')$$,
+  'row-level security', 'owner cannot attach settings to someone else''s circle');
+select t.throws($$update circle_settings set default_invite_days = 91$$, 'check constraint', 'settings invite days capped at 90');
+reset role;
+set role anon; select t.as_user(null);
+select t.throws('select * from circle_settings', 'permission denied', 'signed out: cannot read circle settings');
+select t.throws($$insert into circle_settings (circle_id, owner_id) values ('c2c2c2c2-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-00000000000a')$$,
+  'permission denied', 'signed out: cannot write circle settings');
+reset role;
+set role authenticated; select t.as_user(:B);
+select t.eq((select count(*) from circle_settings), 0::bigint, 'member: cannot read the settings of a circle they''re in');
+select t.ok((select count(*) from circles where id = :COLLEGE) = 1, '...even though they can read its name');
+update circle_settings set default_capacity = 1 where circle_id = :COLLEGE;  -- RLS: matches nothing
+select t.throws($$insert into circle_settings (circle_id, owner_id) values ('c2c2c2c2-0000-0000-0000-000000000002', 'bbbbbbbb-0000-0000-0000-00000000000b')$$,
+  'violates', 'member: cannot create settings for someone else''s circle');
+select t.throws($$insert into circle_settings (circle_id, owner_id) values ('c2c2c2c2-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-00000000000a')$$,
+  'row-level security', 'member: cannot write settings posing as the owner');
+select t.throws('delete from circle_settings', 'permission denied', 'nobody deletes settings directly (the circle''s cascade does)');
+reset role;
+set role authenticated; select t.as_user(:C);
+select t.eq((select count(*) from circle_settings), 0::bigint, 'non-member: cannot read circle settings');
+update circle_settings set preselect_for_new_plans = false;  -- RLS: matches nothing
+reset role;
+select t.eq((select (default_capacity, preselect_for_new_plans)::text from circle_settings where circle_id = :COLLEGE), '(8,t)',
+  'non-owners'' updates changed nothing');
+
 -- ===== Leaving, removal, circle deletion =====
 set role authenticated; select t.as_user(:B);
 delete from circle_members where user_id = :D;  -- RLS: matches no rows for a non-owner
@@ -235,3 +268,4 @@ set role authenticated; select t.as_user(:D);
 select t.eq(get_shared_plan(:P_COLLEGE), null::jsonb, 'deleting the circle hides its plans');
 reset role;
 select t.eq((select visibility from plans where id = :P_COLLEGE), 'circles', 'plan stays circles-only (visible to owner alone), never falls back to public');
+select t.eq((select count(*) from circle_settings where circle_id = :COLLEGE), 0::bigint, 'deleting a circle deletes its settings');

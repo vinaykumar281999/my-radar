@@ -39,14 +39,14 @@ import { useOrigin } from "@/hooks/use-origin";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { formatDateRange, formatDeparture } from "@/lib/dates";
-import { STATUSES, sortPlans, type BlockResult, type Circle, countLeads, type LeadCounts, type JoinNotice, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
+import { STATUSES, sortPlans, type BlockResult, type CircleOption, countLeads, type LeadCounts, type JoinNotice, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
 
 type DashboardClientProps = {
   profile: Profile;
   initialPlans: PlanWithCount[];
   initialPitches: Pitch[];
   initialJoinNotices: JoinNotice[];
-  circles: Pick<Circle, "id" | "name">[];
+  circles: CircleOption[];
   /** plan id -> circle ids it's shared with */
   initialAudiences: Record<string, string[]>;
   viewAsMembers: ViewAsMember[];

@@ -20,6 +20,22 @@ export function inviteMaxUsesChoice(max: number | null | undefined): InviteMaxUs
   return (INVITE_MAX_USES as readonly (number | null)[]).includes(max) ? (max as InviteMaxUses) : DEFAULT_INVITE_MAX_USES;
 }
 
+/** Starting picker values from a circle's saved defaults (none saved: 7 days, 25 people). */
+export function inviteDefaults(settings: { default_invite_days?: number | null; default_invite_max_uses?: number | null } | null | undefined): {
+  days: InviteDays;
+  maxUses: InviteMaxUses;
+} {
+  return {
+    days: inviteDaysChoice(settings?.default_invite_days),
+    maxUses: settings?.default_invite_max_uses == null ? DEFAULT_INVITE_MAX_USES : inviteMaxUsesChoice(settings.default_invite_max_uses),
+  };
+}
+
+/** A picker choice as stored in circle_settings.default_invite_max_uses (no limit = the 500 cap). */
+export function storedMaxUses(choice: InviteMaxUses): number {
+  return choice ?? INVITE_USES_CAP;
+}
+
 export function daysLabel(days: number) {
   return days === 1 ? "1 day" : `${days} days`;
 }

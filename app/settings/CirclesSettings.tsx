@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, ChevronRight, Copy, Link2, Loader2, LogOut, Plus, Trash2, UserPlus, Users, X } from "lucide-react";
+import { Check, ChevronRight, Copy, Link2, Loader2, LogOut, Plus, Settings2, Trash2, UserPlus, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,20 +18,22 @@ import { copyText } from "@/components/ShareButton";
 import { useOrigin } from "@/hooks/use-origin";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { inviteIsActive, type Circle, type CircleInvite, type CircleMember } from "@/lib/types";
+import { inviteIsActive, type Circle, type CircleInvite, type CircleMember, type CircleSettings } from "@/lib/types";
 import {
   DEFAULT_INVITE_DAYS,
   DEFAULT_INVITE_MAX_USES,
   INVITE_DAYS,
   INVITE_MAX_USES,
   daysLabel,
+  inviteDefaults,
   maxUsesLabel,
+  storedMaxUses,
   usesLabel,
   type InviteDays,
   type InviteMaxUses,
 } from "@/lib/invites";
 
-export type OwnedCircle = Circle & { members: CircleMember[]; invites: CircleInvite[] };
+export type OwnedCircle = Circle & { members: CircleMember[]; invites: CircleInvite[]; settings: CircleSettings | null };
 export type Membership = { circle_id: string; name: string; owner_username: string; owner_display_name: string };
 
 // FK hints: circles and profiles are also linked through circle_members, which is ambiguous for PostgREST.
@@ -73,7 +75,7 @@ export function CirclesSettings({
       toast.error(error?.code === "23505" ? "You already have a circle with that name." : "Couldn't create the circle.");
       return;
     }
-    setCircles((cs) => [...cs, { ...data, members: [], invites: [] }]);
+    setCircles((cs) => [...cs, { ...data, members: [], invites: [], settings: null }]);
     setNewName("");
   }
 
@@ -173,6 +175,14 @@ function CircleCard({
   const [picking, setPicking] = useState(false);
   const [inviteDays, setInviteDays] = useState<InviteDays>(DEFAULT_INVITE_DAYS);
   const [inviteMaxUses, setInviteMaxUses] = useState<InviteMaxUses>(DEFAULT_INVITE_MAX_USES);
+
+  /** Open the invite picker, starting from this circle's saved defaults. */
+  function startInvite() {
+    const d = inviteDefaults(circle.settings);
+    setInviteDays(d.days);
+    setInviteMaxUses(d.maxUses);
+    setPicking(true);
+  }
   const [creatingInvite, setCreatingInvite] = useState(false);
   const joinedVia = (invite: CircleInvite) => circle.members.filter((m) => m.invite_id === invite.id);
 
@@ -406,7 +416,7 @@ function CircleCard({
             </div>
           </div>
         ) : (
-          <Button size="sm" variant="ghost" onClick={() => setPicking(true)} className="text-muted-foreground">
+          <Button size="sm" variant="ghost" onClick={startInvite} className="text-muted-foreground">
             <Link2 /> {activeInvites.length ? "Another invite link" : "Create invite link"}
           </Button>
         )}
@@ -425,6 +435,12 @@ function CircleCard({
         )}
       </div>
 
+      <CircleDefaults
+        circle={circle}
+        userId={userId}
+        onSaved={(settings) => onChange((c) => ({ ...c, settings }))}
+      />
+
       <RemoveMemberDialog
         key={removing?.user_id ?? "none"}
         member={removing}
@@ -437,6 +453,125 @@ function CircleCard({
         }}
       />
     </div>
+  );
+}
+
+/** Owner-only defaults for this circle (circle_settings; members never see them). */
+function CircleDefaults({
+  circle,
+  userId,
+  onSaved,
+}: {
+  circle: OwnedCircle;
+  userId: string;
+  onSaved: (settings: CircleSettings) => void;
+}) {
+  const saved = circle.settings;
+  const startInvite = inviteDefaults(saved);
+  const [preselect, setPreselect] = useState(saved?.preselect_for_new_plans ?? false);
+  const [capacity, setCapacity] = useState<number | null>(saved?.default_capacity ?? null);
+  const [days, setDays] = useState<InviteDays>(startInvite.days);
+  const [maxUses, setMaxUses] = useState<InviteMaxUses>(startInvite.maxUses);
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    const { data, error } = await createClient()
+      .from("circle_settings")
+      .upsert({
+        circle_id: circle.id,
+        owner_id: userId,
+        preselect_for_new_plans: preselect,
+        default_capacity: capacity,
+        default_invite_days: days,
+        default_invite_max_uses: storedMaxUses(maxUses),
+        updated_at: new Date().toISOString(),
+      })
+      .select()
+      .single<CircleSettings>();
+    setSaving(false);
+    if (error || !data) {
+      toast.error("Couldn't save those defaults.");
+      return;
+    }
+    onSaved(data);
+    toast.success(`Saved defaults for ${circle.name}`);
+  }
+
+  return (
+    <details className="group mt-3 text-xs">
+      <summary className="flex cursor-pointer list-none items-center gap-1 py-1 text-muted-foreground hover:text-foreground">
+        <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
+        <Settings2 className="size-3.5" /> Defaults
+        <span className="ml-1 font-normal">(only you see these)</span>
+      </summary>
+      <div className="mt-2 space-y-2.5 rounded-lg border p-2.5">
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            checked={preselect}
+            onChange={(e) => setPreselect(e.target.checked)}
+            className="mt-0.5 size-4 accent-foreground"
+          />
+          <span>
+            Pick {circle.name} by default
+            <span className="block text-muted-foreground">
+              When a new plan is set to Circles, this one starts ticked. It never changes who can see a plan on its own.
+            </span>
+          </span>
+        </label>
+        <label className="flex items-center gap-2">
+          <span className="text-muted-foreground">Default spots</span>
+          <Input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={50}
+            value={capacity ?? ""}
+            onChange={(e) => {
+              const n = Number.parseInt(e.target.value, 10);
+              setCapacity(Number.isNaN(n) ? null : Math.min(50, Math.max(1, n)));
+            }}
+            placeholder="None"
+            aria-label={`Default spots for plans shared only with ${circle.name}`}
+            className="h-8 w-20 text-sm"
+          />
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <label className="flex items-center gap-1.5">
+            <span className="text-muted-foreground">Invite links expire in</span>
+            <select
+              value={days}
+              onChange={(e) => setDays(Number(e.target.value) as InviteDays)}
+              className="h-8 rounded-md border bg-background px-2"
+            >
+              {INVITE_DAYS.map((d) => (
+                <option key={d} value={d}>
+                  {daysLabel(d)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-1.5">
+            <span className="text-muted-foreground">for up to</span>
+            <select
+              value={maxUses ?? ""}
+              onChange={(e) => setMaxUses((e.target.value ? Number(e.target.value) : null) as InviteMaxUses)}
+              className="h-8 rounded-md border bg-background px-2"
+            >
+              {INVITE_MAX_USES.map((m) => (
+                <option key={m ?? "none"} value={m ?? ""}>
+                  {maxUsesLabel(m)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <Button size="sm" variant="outline" onClick={save} disabled={saving}>
+          {saving ? <Loader2 className="animate-spin" /> : <Check />} Save defaults
+        </Button>
+      </div>
+    </details>
   );
 }
 

@@ -1001,6 +1001,40 @@ $$;
 revoke all on function public.create_circle_invite(uuid, int, int) from public, anon;
 grant execute on function public.create_circle_invite(uuid, int, int) to authenticated;
 
+-- -----------------------------------------------------------------------------
+-- Per-circle defaults, for the owner's own forms. Owner-only: unlike the
+-- circles row (whose name members can read), nothing here is ever visible to
+-- members or anyone else.
+--   default_invite_max_uses: null = the app default (25); 500 = "no limit".
+-- -----------------------------------------------------------------------------
+create table if not exists public.circle_settings (
+  circle_id                uuid primary key references public.circles (id) on delete cascade,
+  owner_id                 uuid not null,
+  preselect_for_new_plans  boolean not null default false,
+  default_capacity         int check (default_capacity is null or default_capacity between 1 and 50),
+  default_invite_days      int not null default 7 check (default_invite_days between 1 and 90),
+  default_invite_max_uses  int check (default_invite_max_uses is null or default_invite_max_uses between 1 and 500),
+  updated_at               timestamptz not null default now(),
+  -- owner_id must be the circle's owner
+  foreign key (circle_id, owner_id) references public.circles (id, owner_id) on delete cascade
+);
+
+alter table public.circle_settings enable row level security;
+revoke all on public.circle_settings from anon, authenticated;
+grant select, insert, update on public.circle_settings to authenticated;
+
+drop policy if exists "circle_settings_select_owner" on public.circle_settings;
+drop policy if exists "circle_settings_insert_owner" on public.circle_settings;
+drop policy if exists "circle_settings_update_owner" on public.circle_settings;
+create policy "circle_settings_select_owner" on public.circle_settings
+  for select to authenticated using (owner_id = auth.uid() and public.is_circle_owner(circle_id));
+create policy "circle_settings_insert_owner" on public.circle_settings
+  for insert to authenticated with check (owner_id = auth.uid() and public.is_circle_owner(circle_id));
+create policy "circle_settings_update_owner" on public.circle_settings
+  for update to authenticated
+  using (owner_id = auth.uid() and public.is_circle_owner(circle_id))
+  with check (owner_id = auth.uid() and public.is_circle_owner(circle_id));
+
 alter table public.circles        enable row level security;
 alter table public.circle_members enable row level security;
 alter table public.circle_invites enable row level security;
