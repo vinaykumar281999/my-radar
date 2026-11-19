@@ -5,9 +5,10 @@ Run `npm run dev` and open http://localhost:3000. Use two browsers or a private 
 **Before testing:** `.env.local` has `SUPABASE_SERVICE_ROLE_KEY` (interest and pitches fail without it), `supabase/schema.sql` has been re-run, and `node --env-file=.env.local scripts/check-rls.mjs` prints "All checks passed".
 
 **Automated checks** (run these first; the manual list below covers what they can't):
-- `npm run test:unit`: who-sees-what rules (story export, Copy to my Radar), dates, time zones, .ics, CSV
-- `npm run test:db`: `schema.sql` fresh + re-run, then RLS/trigger/function tests as anon, members, non-members, owners and the server, including a two-session overbooking test. Needs local Postgres (`brew install postgresql@15`)
-- `npm run test:leaks` with `npm run dev` running: creates 3 throwaway users in your project, byte-compares the signed-out profile page, OG image and a circle plan's link before/after adding private plans, checks copy, iCal, RPCs and interest submissions, then deletes the users
+- `npm run test:unit`: who-sees-what rules (story export, Copy to my Radar), dates, time zones, .ics, CSV, profile filters + `safeNext`, templates (never carry visibility), invite and circle defaults, rider flags, waitlist order
+- `npm run test:db`: `schema.sql` fresh + re-run (empty, and over existing data), then RLS/trigger/function tests as anon, members, non-members, owners and the server, including two-session overbooking and waitlist-promotion tests. Needs local Postgres (`brew install postgresql@15`)
+- `npm run test:leaks` with `npm run dev` running: creates 3 throwaway users in your project, byte-compares the signed-out profile page (with and without `?category=Trip`), OG image and a circle plan's link before/after adding private plans, checks copy, iCal, RPCs and interest submissions, then deletes the users
+- After pulling schema changes, re-run `supabase/schema.sql` in the SQL editor **before** deploying the app: the app reads and writes the new columns. `scripts/check-rls.mjs` fails on the new table/functions until you do
 
 ## 1. Magic-link signup
 - [ ] `/login` → **Magic link** tab → enter a new email → "Check your inbox" appears
@@ -180,7 +181,7 @@ Use three accounts: **owner**, **member**, **outsider** (e.g. three browsers / p
 **Managing circles (owner → Settings → Circles)**
 - [ ] Create "College" → card appears; creating "College" again → "You already have a circle with that name."
 - [ ] Add by username: member's username → chip appears; unknown name → "No one is @x"; your own → "That's you…"; same person twice → "already in"
-- [ ] **Create invite link** → copied, row shows `0/25 · 7d`; **Revoke** → row disappears
+- [ ] **Create invite link** → picker (Expires in 1 / 7 / 30 / 90 days, default 7; Up to No limit / 1 / 5 / 25, default 25) → **Create & copy** → row shows `0 / 25 · 7d left` (No limit shows `0 joined`); **Revoke** → row moves to the collapsed **Expired & revoked** list
 - [ ] Delete a circle → "Tap again" → deleted; its plans now show "No circles — only you" on the dashboard
 
 **Invite links**
@@ -213,7 +214,7 @@ Use three accounts: **owner**, **member**, **outsider** (e.g. three browsers / p
 - [ ] Private window: request a spot → "Requested! <Name> will confirm your spot."
 - [ ] Signed in as someone else: request → card switches to "Requested · waiting for an answer" (still there after reload)
 - [ ] Dashboard row shows `0/2` with "2 new"; open it → **Spot requests**, meter "0 of 2 spots taken · 2 waiting"
-- [ ] **Approve** both → meter 2 of 2; public card shows **Full** (button disabled); a third request (private window) → "It just filled up!"
+- [ ] **Approve** both → meter 2 of 2; public card shows **Full** and the button becomes **Join the waitlist**; a third request (private window) → "You're on the waitlist" (see section 21)
 - [ ] Signed-in requester's card now says "You're in ✓"
 - [ ] **Take back spot** on one → frees it (card: "1 of 2 spots left"), requester sees "Not this time"
 - [ ] Delete an approved request, or **Block** that person → their spot frees up immediately
@@ -231,6 +232,53 @@ Use three accounts: **owner**, **member**, **outsider** (e.g. three browsers / p
 - [ ] Add to calendar → a timed event at the departure time (not all-day); same in the iCal feed
 - [ ] Edit the carpool → pickup/contact load into the form; switching it to another category removes them
 - [ ] Pitch form has no Carpool category; no copy icon on carpools
+
+## 18. Invite links (management)
+- [ ] Someone joins through a link → under that link: "Joined: @them"; still listed under the link after it's revoked or expired (in **Expired & revoked**)
+- [ ] Expired / revoked / used-up links show the reason and date; the list is collapsed by default
+- [ ] A revoked link can't be brought back (there's no un-revoke; the database refuses it)
+- [ ] Opening a revoked or expired link → "This invite link doesn't work anymore" with no circle name, same as a made-up token
+
+## 19. Profile filters
+- [ ] Public page: category chips (6) and status chips (3) above the plans; tap Trip → only Trips, URL shows `?category=Trip`; tap again → cleared
+- [ ] Trip + Locked In → `?category=Trip&status=Locked+In`; **Clear** removes both
+- [ ] A filter with no matches → "No plans match" (no counts)
+- [ ] Member signed in: filters also apply to "Shared with you" plans
+- [ ] Signed out on `/<you>?category=Trip` → **Sign in to see plans shared with you** → after sign-in (password, magic link, and new account via onboarding) you land on `/<you>?category=Trip` with the filter applied
+- [ ] View source of `/<you>?category=Trip` signed out: no chip is pressed (`aria-pressed="true"` absent), the full public list is in the HTML; filtering happens after load
+- [ ] Unknown values (`?category=<script>`) are ignored
+
+## 20. Templates and flexible dates
+- [ ] New plan → template chips (Weekend Cabin, Road Trip, Concert / Night Out, Day Hike, Ride Share) → fills category, Just an Idea, title, spots; nothing is saved until **Post plan**
+- [ ] A typed title is kept when picking a template; switching templates replaces only a template title
+- [ ] **Ride Share** → Carpool, and Who can see it switches to **Circles** (with no circle ticked yet); templates never change Unlisted / Circles you already picked
+- [ ] Editing a plan shows no template chips
+- [ ] **Flexible on dates** checkbox (hidden for Carpool) → card shows "Dates flexible", dashboard row "· dates flexible"; switching to Carpool clears it
+
+## 21. Waitlist
+Use a plan with Spots: 1 and three accounts (or private windows) as requesters.
+- [ ] Approve the first request → card **Full**, button **Join the waitlist**
+- [ ] Second and third request → "You're on the waitlist"; signed-in requesters' cards show **Waitlist #1** / **Waitlist #2** (each sees only their own number)
+- [ ] Owner: requests drawer → **Waitlist** section in order (#1, #2), meter shows "· 2 on waitlist"
+- [ ] **Take back spot** on the approved person → #1 moves to the top as Waiting with **Promoted from waitlist** (never approved automatically); #2's card now says **Waitlist #1**
+- [ ] Raise Spots to 3 → everyone who fits moves to Waiting
+- [ ] Circle plan: remove a waitlisted member from the circle, then free a spot → they're skipped and the next member is promoted; the removed member sees "This plan isn't available"
+- [ ] Signed out / non-member on a full circle plan → still "This plan isn't available" (never "waitlist")
+- [ ] Spot counts on the public card never show the waitlist size
+
+## 22. Carpool notes
+- [ ] Request a seat → "For the driver" checkboxes: **I can take a turn driving**, **I'm bringing a big bag** (not shown on non-carpool plans)
+- [ ] Owner: requests drawer shows **Can drive** / **Big bag** badges, "Approved riders: 2 riders can also drive · 1 big bag" and CSV columns
+- [ ] Owner's own carpool card (on their page) shows the private block with the riders summary
+- [ ] Edit carpool → **Note to riders** (280 max) → approved rider sees it next to the pickup; pending riders, other riders, outsiders and riders removed from the circle never do
+- [ ] A rider never sees another rider's flags
+
+## 23. Circle defaults
+- [ ] Settings → circle → **Defaults** (collapsed, "only you see these"): pick by default, default spots, invite expiry / max uses → **Save defaults**
+- [ ] Next **Create invite link** starts from those defaults
+- [ ] New plan: choosing **Circles** ticks the "pick by default" circles; choosing Carpool (which switches to Circles itself) does not tick them
+- [ ] Exactly one circle ticked with default spots and Spots left empty → Spots fills in (hint "This circle's default"); tick a second circle → it clears; typing your own spots is never overwritten
+- [ ] A member of that circle can't see any of its defaults (Settings → "Circles you're in" shows only the name)
 
 ## Known limitation
 - Unknown usernames return HTTP **200** (the not-found page streams in after the shell is sent). Visitors see the right page; only bots see a 200.

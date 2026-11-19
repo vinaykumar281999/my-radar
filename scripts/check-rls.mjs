@@ -23,11 +23,11 @@ const unreadable = (r) => denied(r) || (!r.error && r.data.length === 0);
 // --- Schema present -----------------------------------------------------------
 let r = await sb
   .from("plans")
-  .select("suggested_by_handle, chained_from_plan_id, visibility, start_date, end_date, capacity, origin, destination, departs_at, departs_tz")
+  .select("suggested_by_handle, chained_from_plan_id, visibility, start_date, end_date, dates_flexible, capacity, origin, destination, departs_at, departs_tz")
   .limit(1);
-check("plans has chain, visibility, date, spots and carpool columns", !r.error, r.error?.message);
-r = await sb.from("interests").select("status, user_id").limit(1);
-check("interests has status and user_id", denied(r) || !r.error, describe(r));
+check("plans has chain, visibility, date (incl. dates_flexible), spots and carpool columns", !r.error, r.error?.message);
+r = await sb.from("interests").select("status, user_id, can_drive, large_bag, promoted_at").limit(1);
+check("interests has status, user_id, rider flags and promoted_at", denied(r) || !r.error, describe(r));
 r = await sb.from("profiles").select("pitches_paused").limit(1);
 check("profiles has pitches_paused", !r.error, r.error?.message);
 
@@ -53,6 +53,7 @@ for (const table of [
   "circle_invites",
   "plan_audiences",
   "plan_private_details",
+  "circle_settings",
 ]) {
   r = await sb.from(table).select("*").limit(5);
   check(`anon cannot read ${table}`, unreadable(r), describe(r));
@@ -74,6 +75,9 @@ const rpcDenied = [
   ["redeem_circle_invite", { p_token: "rls_check" }],
   ["approve_spot", { p_interest_id: ZERO }],
   ["decline_spot", { p_interest_id: ZERO }],
+  ["create_circle_invite", { p_circle_id: ZERO, p_days: 7, p_max_uses: 1 }],
+  ["promote_waitlist", { p_plan_id: ZERO }],
+  ["my_waitlist_position", { p_plan_id: ZERO }],
 ];
 for (const [fn, args] of rpcDenied) {
   r = await sb.rpc(fn, args);

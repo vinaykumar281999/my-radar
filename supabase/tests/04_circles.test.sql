@@ -232,6 +232,7 @@ select t.throws($$update circle_settings set default_invite_days = 91$$, 'check 
 reset role;
 set role anon; select t.as_user(null);
 select t.throws('select * from circle_settings', 'permission denied', 'signed out: cannot read circle settings');
+select t.throws($$select create_circle_invite('c1c1c1c1-0000-0000-0000-000000000001', 7, 1)$$, 'permission denied', 'signed out: cannot create invite links');
 select t.throws($$insert into circle_settings (circle_id, owner_id) values ('c2c2c2c2-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-00000000000a')$$,
   'permission denied', 'signed out: cannot write circle settings');
 reset role;

@@ -54,7 +54,9 @@ const normalize = (html) =>
     .toString("utf8")
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<uuid>")
     .replace(/"buildId":"[^"]*"/g, "")
-    .replace(/nonce="[^"]*"/g, "");
+    .replace(/nonce="[^"]*"/g, "")
+    // Next's random per-request render id (differs on every request).
+    .replace(/self\.__next_r="[^"]*"/g, "");
 
 // Profile filters are applied only in the browser; the server never reads the
 // query string. The one thing allowed to differ is Next echoing the requested
@@ -141,6 +143,11 @@ try {
     const fb = stripQuery(normalize(before.filtered.body));
     check(`signed-out ?${FILTER_QS} profile identical before vs after private plans`, fb === filtered, fb === filtered ? "" : firstDiff(fb, filtered));
     check(`?${FILTER_QS} profile never contains the circle/unlisted titles`, !fa.includes(SECRET) && !fa.includes(UNLISTED));
+    // The server never applies filters: no chip is pressed in its HTML, and the
+    // only place the query string may appear is Next echoing the URL.
+    check(`?${FILTER_QS} server HTML has no active filter chip`, !fa.includes('aria-pressed="true"'));
+    const echoes = (fa.match(/category=Trip|__PAGE__\?\{/g) ?? []).length;
+    console.log(`      (Next echoed the query string ${echoes} time(s); those are stripped before comparing)`);
   }
   check("OG image identical with vs without private plans", before.og.body.equals(after.og.body));
   const [mb, ma] = [normalize(before.missingLink.body), normalize(after.circleLink.body)];

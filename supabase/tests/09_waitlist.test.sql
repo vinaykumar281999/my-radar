@@ -83,6 +83,7 @@ select t.eq(my_waitlist_position(:PC), null::int, '...on every plan');
 reset role;
 set role anon; select t.as_user(null);
 select t.throws($$select my_waitlist_position('f1f1f1f1-0000-0000-0000-000000000001')$$, 'permission denied', 'anon cannot ask for positions');
+select t.throws($$select promote_waitlist('f1f1f1f1-0000-0000-0000-000000000001')$$, 'permission denied', 'anon cannot call promote_waitlist');
 reset role;
 set role authenticated; select t.as_user(:B);
 select t.eq(my_waitlist_position(:P), null::int, 'once promoted, no position');
