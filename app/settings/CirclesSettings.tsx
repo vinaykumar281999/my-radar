@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Copy, Link2, Loader2, LogOut, Plus, Trash2, UserPlus, Users, X } from "lucide-react";
+import { Check, ChevronRight, Copy, Link2, Loader2, LogOut, Plus, Trash2, UserPlus, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +19,17 @@ import { useOrigin } from "@/hooks/use-origin";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { inviteIsActive, type Circle, type CircleInvite, type CircleMember } from "@/lib/types";
+import {
+  DEFAULT_INVITE_DAYS,
+  DEFAULT_INVITE_MAX_USES,
+  INVITE_DAYS,
+  INVITE_MAX_USES,
+  daysLabel,
+  maxUsesLabel,
+  usesLabel,
+  type InviteDays,
+  type InviteMaxUses,
+} from "@/lib/invites";
 
 export type OwnedCircle = Circle & { members: CircleMember[]; invites: CircleInvite[] };
 export type Membership = { circle_id: string; name: string; owner_username: string; owner_display_name: string };
@@ -158,6 +169,12 @@ function CircleCard({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [removing, setRemoving] = useState<CircleMember | null>(null);
   const activeInvites = circle.invites.filter((i) => inviteIsActive(i, now));
+  const pastInvites = circle.invites.filter((i) => !inviteIsActive(i, now));
+  const [picking, setPicking] = useState(false);
+  const [inviteDays, setInviteDays] = useState<InviteDays>(DEFAULT_INVITE_DAYS);
+  const [inviteMaxUses, setInviteMaxUses] = useState<InviteMaxUses>(DEFAULT_INVITE_MAX_USES);
+  const [creatingInvite, setCreatingInvite] = useState(false);
+  const joinedVia = (invite: CircleInvite) => circle.members.filter((m) => m.invite_id === invite.id);
 
   useEffect(() => {
     if (!confirmDelete) return;
@@ -229,18 +246,21 @@ function CircleCard({
   }
 
   async function createInvite() {
+    setCreatingInvite(true);
+    // Expiry is counted on the database clock (see create_circle_invite).
     const { data, error } = await createClient()
-      .from("circle_invites")
-      .insert({ circle_id: circle.id })
-      .select()
+      .rpc("create_circle_invite", { p_circle_id: circle.id, p_days: inviteDays, p_max_uses: inviteMaxUses })
       .single<CircleInvite>();
+    setCreatingInvite(false);
     if (error || !data) {
       toast.error("Couldn't create a link.");
       return;
     }
     onChange((c) => ({ ...c, invites: [...c.invites, data] }));
+    setPicking(false);
+    const who = inviteMaxUses == null ? "no limit on people" : `up to ${maxUsesLabel(inviteMaxUses)}`;
     if (await copyText(`${window.location.origin}/join/${data.token}`)) {
-      toast.success("Invite link copied", { description: "Works for 7 days, up to 25 people." });
+      toast.success("Invite link copied", { description: `Works for ${daysLabel(inviteDays)}, ${who}.` });
     }
   }
 
@@ -335,11 +355,74 @@ function CircleCard({
 
       <div className="mt-3 space-y-1.5">
         {activeInvites.map((invite) => (
-          <InviteRow key={invite.id} invite={invite} now={now} url={origin ? `${origin}/join/${invite.token}` : ""} onRevoke={() => revokeInvite(invite)} />
+          <InviteRow
+            key={invite.id}
+            invite={invite}
+            now={now}
+            url={origin ? `${origin}/join/${invite.token}` : ""}
+            joined={joinedVia(invite)}
+            onRevoke={() => revokeInvite(invite)}
+          />
         ))}
-        <Button size="sm" variant="ghost" onClick={createInvite} className="text-muted-foreground">
-          <Link2 /> {activeInvites.length ? "Another invite link" : "Create invite link"}
-        </Button>
+        {picking ? (
+          <div className="space-y-2 rounded-lg border p-2.5 text-xs">
+            <div className="flex flex-wrap gap-2">
+              <label className="flex items-center gap-1.5">
+                <span className="text-muted-foreground">Expires in</span>
+                <select
+                  value={inviteDays}
+                  onChange={(e) => setInviteDays(Number(e.target.value) as InviteDays)}
+                  className="h-8 rounded-md border bg-background px-2"
+                >
+                  {INVITE_DAYS.map((d) => (
+                    <option key={d} value={d}>
+                      {daysLabel(d)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center gap-1.5">
+                <span className="text-muted-foreground">Up to</span>
+                <select
+                  value={inviteMaxUses ?? ""}
+                  onChange={(e) => setInviteMaxUses((e.target.value ? Number(e.target.value) : null) as InviteMaxUses)}
+                  className="h-8 rounded-md border bg-background px-2"
+                >
+                  {INVITE_MAX_USES.map((m) => (
+                    <option key={m ?? "none"} value={m ?? ""}>
+                      {maxUsesLabel(m)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={createInvite} disabled={creatingInvite}>
+                {creatingInvite ? <Loader2 className="animate-spin" /> : <Link2 />} Create &amp; copy
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setPicking(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Button size="sm" variant="ghost" onClick={() => setPicking(true)} className="text-muted-foreground">
+            <Link2 /> {activeInvites.length ? "Another invite link" : "Create invite link"}
+          </Button>
+        )}
+        {pastInvites.length > 0 && (
+          <details className="group text-xs">
+            <summary className="flex cursor-pointer list-none items-center gap-1 py-1 text-muted-foreground hover:text-foreground">
+              <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
+              Expired &amp; revoked ({pastInvites.length})
+            </summary>
+            <ul className="mt-1 space-y-1.5">
+              {pastInvites.map((invite) => (
+                <PastInviteRow key={invite.id} invite={invite} now={now} joined={joinedVia(invite)} />
+              ))}
+            </ul>
+          </details>
+        )}
       </div>
 
       <RemoveMemberDialog
@@ -361,11 +444,13 @@ function InviteRow({
   invite,
   now,
   url,
+  joined,
   onRevoke,
 }: {
   invite: CircleInvite;
   now: number;
   url: string;
+  joined: CircleMember[];
   onRevoke: () => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -379,18 +464,49 @@ function InviteRow({
   }
 
   return (
-    <div className="flex items-center gap-2 rounded-lg bg-muted px-2.5 py-1.5 text-xs">
-      <button type="button" onClick={copy} className="flex min-w-0 flex-1 items-center gap-1.5 text-left" aria-label="Copy invite link">
-        {copied ? <Check className="size-3.5 shrink-0 text-emerald-500" /> : <Copy className="size-3.5 shrink-0" />}
-        <span className="truncate font-mono">{url || "…"}</span>
-      </button>
-      <span className="shrink-0 text-muted-foreground tabular-nums">
-        {invite.uses}/{invite.max_uses} · {days}d
-      </span>
-      <button type="button" onClick={onRevoke} className="shrink-0 font-semibold hover:underline">
-        Revoke
-      </button>
+    <div className="rounded-lg bg-muted px-2.5 py-1.5 text-xs">
+      <div className="flex items-center gap-2">
+        <button type="button" onClick={copy} className="flex min-w-0 flex-1 items-center gap-1.5 text-left" aria-label="Copy invite link">
+          {copied ? <Check className="size-3.5 shrink-0 text-emerald-500" /> : <Copy className="size-3.5 shrink-0" />}
+          <span className="truncate font-mono">{url || "…"}</span>
+        </button>
+        <span className="shrink-0 text-muted-foreground tabular-nums">
+          {usesLabel(invite.uses, invite.max_uses)} · {days}d left
+        </span>
+        <button type="button" onClick={onRevoke} className="shrink-0 font-semibold hover:underline">
+          Revoke
+        </button>
+      </div>
+      <JoinedVia joined={joined} />
     </div>
+  );
+}
+
+function PastInviteRow({ invite, now, joined }: { invite: CircleInvite; now: number; joined: CircleMember[] }) {
+  const reason = invite.revoked_at
+    ? `Revoked ${new Date(invite.revoked_at).toLocaleDateString()}`
+    : new Date(invite.expires_at).getTime() <= now
+      ? `Expired ${new Date(invite.expires_at).toLocaleDateString()}`
+      : "Used up";
+  return (
+    <li className="rounded-lg border border-dashed px-2.5 py-1.5 text-muted-foreground">
+      <div className="flex items-center gap-2">
+        <span className="min-w-0 flex-1 truncate font-mono">…{invite.token.slice(-8)}</span>
+        <span className="shrink-0 tabular-nums">{usesLabel(invite.uses, invite.max_uses)}</span>
+        <span className="shrink-0">{reason}</span>
+      </div>
+      <JoinedVia joined={joined} />
+    </li>
+  );
+}
+
+/** Who (still in the circle) joined through this link. */
+function JoinedVia({ joined }: { joined: CircleMember[] }) {
+  if (joined.length === 0) return null;
+  return (
+    <p className="mt-1 truncate text-muted-foreground">
+      Joined: {joined.map((m) => `@${m.profiles?.username ?? "unknown"}`).join(", ")}
+    </p>
   );
 }
 

@@ -913,6 +913,61 @@ grant insert (circle_id, expires_at, max_uses) on public.circle_invites to authe
 grant update (revoked_at) on public.circle_invites to authenticated;
 grant select, insert, delete on public.plan_audiences to authenticated;
 
+-- Invite links live at most 90 days. Clamp older rows first so adding the
+-- constraint can't fail on an existing database (re-runs find nothing to clamp).
+update public.circle_invites
+   set expires_at = created_at + interval '90 days'
+ where expires_at > created_at + interval '90 days';
+alter table public.circle_invites drop constraint if exists circle_invites_expiry_cap;
+alter table public.circle_invites add constraint circle_invites_expiry_cap
+  check (expires_at <= created_at + interval '90 days');
+
+-- Revoking is one-way: once revoked_at is set it can't be cleared or moved.
+create or replace function public.guard_invite_revoke()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if old.revoked_at is not null and new.revoked_at is distinct from old.revoked_at then
+    raise exception 'invite_already_revoked' using errcode = 'P0001';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.guard_invite_revoke() from public, anon, authenticated;
+
+drop trigger if exists circle_invites_guard_revoke on public.circle_invites;
+create trigger circle_invites_guard_revoke
+  before update on public.circle_invites
+  for each row execute function public.guard_invite_revoke();
+
+-- New invite link with an expiry counted on the database clock (a browser
+-- clock running ahead could otherwise trip the 90-day cap). SECURITY INVOKER:
+-- the invites_owner policy and column grants still decide.
+create or replace function public.create_circle_invite(p_circle_id uuid, p_days int, p_max_uses int)
+returns public.circle_invites
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v public.circle_invites;
+begin
+  if p_days is null or p_days not between 1 and 90 then
+    raise exception 'invalid_expiry' using errcode = '22023';
+  end if;
+  insert into public.circle_invites (circle_id, expires_at, max_uses)
+  values (p_circle_id, now() + make_interval(days => p_days), coalesce(p_max_uses, 500))
+  returning * into v;
+  return v;
+end;
+$$;
+
+revoke all on function public.create_circle_invite(uuid, int, int) from public, anon;
+grant execute on function public.create_circle_invite(uuid, int, int) to authenticated;
+
 alter table public.circles        enable row level security;
 alter table public.circle_members enable row level security;
 alter table public.circle_invites enable row level security;

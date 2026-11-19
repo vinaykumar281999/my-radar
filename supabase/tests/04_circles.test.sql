@@ -134,10 +134,37 @@ select t.eq((select count(*) from circle_members where invite_id is not null and
 update circle_members set seen_at = now() where user_id = :D;
 select t.eq((select count(*) from circle_members where invite_id is not null and seen_at is null), 0::bigint, 'notice dismissed');
 update circle_invites set revoked_at = now();
+select t.throws('update circle_invites set revoked_at = null', 'invite_already_revoked', 'revoked link cannot be un-revoked');
+select t.throws($$update circle_invites set revoked_at = now() + interval '1 day'$$, 'invite_already_revoked', 'revoked_at cannot be moved either');
+select t.ok((select bool_and(revoked_at is not null) from circle_invites), 'link is still revoked');
+select t.throws($$insert into circle_invites (circle_id, expires_at) values ('c2c2c2c2-0000-0000-0000-000000000002', now() + interval '91 days')$$,
+  'circle_invites_expiry_cap', 'expiry past 90 days is rejected');
+insert into circle_invites (circle_id, expires_at) values (:WORK, now() + interval '90 days');
+select t.ok(true, 'expiry of exactly 90 days is allowed');
+select t.eq((create_circle_invite(:WORK, 30, null)).max_uses, 500, 'create_circle_invite: no limit is the 500 cap');
+select t.throws($$select create_circle_invite('c2c2c2c2-0000-0000-0000-000000000002', 91, 5)$$, 'invalid_expiry', 'create_circle_invite: refuses more than 90 days');
+select t.throws($$select create_circle_invite('c3c3c3c3-0000-0000-0000-000000000003', 7, 5)$$, 'row-level security', 'create_circle_invite: not for someone else''s circle');
+delete from circle_invites where circle_id = :WORK;
 reset role;
 set role authenticated; select t.as_user(:E);
 select t.throws($$select redeem_circle_invite((select token from inv))$$, 'invite_invalid', 'revoked link refused');
 select t.eq(get_invite_preview((select token from inv)), '{"status": "invalid"}'::jsonb, 'revoked link preview reveals nothing');
+-- Revoked, expired and missing tokens must be indistinguishable to the redeemer.
+create temp table redeem_errs (label text, state text, msg text);
+do $$
+declare v_state text; v_msg text; v_token text;
+begin
+  foreach v_token in array array[(select token from inv), 'no-such-token-at-all'] loop
+    begin
+      perform public.redeem_circle_invite(v_token);
+    exception when others then
+      get stacked diagnostics v_state = returned_sqlstate, v_msg = message_text;
+      insert into redeem_errs values (case when v_token = 'no-such-token-at-all' then 'missing' else 'revoked' end, v_state, v_msg);
+    end;
+  end loop;
+end $$;
+select t.eq((select count(distinct (state, msg)) from redeem_errs), 1::bigint, 'revoked link error is identical to a missing token');
+select t.ok((select bool_and(msg not ilike '%College%') from redeem_errs), 'revoked link error leaks no circle name');
 reset role;
 
 set role authenticated; select t.as_user(:A);
@@ -154,6 +181,23 @@ reset role;
 set role authenticated; select t.as_user(:C);
 select t.throws($$select redeem_circle_invite((select token from single_use))$$, 'invite_invalid', 'single-use link refused the second time');
 select t.throws($$select redeem_circle_invite((select token from expired))$$, 'invite_invalid', 'expired link refused');
+select t.eq(get_invite_preview((select token from expired)), '{"status": "invalid"}'::jsonb, 'expired link preview reveals nothing');
+create temp table expired_errs (state text, msg text);
+do $$
+declare v_state text; v_msg text; v_token text;
+begin
+  foreach v_token in array array[(select token from expired), 'no-such-token-at-all'] loop
+    begin
+      perform public.redeem_circle_invite(v_token);
+    exception when others then
+      get stacked diagnostics v_state = returned_sqlstate, v_msg = message_text;
+      insert into expired_errs values (v_state, v_msg);
+    end;
+  end loop;
+end $$;
+select t.eq((select count(*) from expired_errs), 2::bigint, 'expired and missing both refused');
+select t.eq((select count(distinct (state, msg)) from expired_errs), 1::bigint, 'expired link error is identical to a missing token');
+select t.ok((select bool_and(msg not ilike '%Work%') from expired_errs), 'expired link error leaks no circle name');
 reset role;
 
 -- ===== Server actions (service role) =====
