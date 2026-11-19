@@ -14,7 +14,7 @@ export function submitErrorMessage(error: SubmitError, hostFirstName: string) {
     case "sign_in_required":
       return "Sign in to request a seat, so the driver knows who's riding.";
     case "plan_full":
-      return "You're on the waitlist";
+      return "It just filled up. Try again in a moment.";
     case "plan_unavailable":
       return "This isn't available anymore.";
     case "invalid":

@@ -13,6 +13,9 @@ test("owner's waitlist is in line order: created_at, then id", () => {
   assert.deepEqual(waitlistOrder(leads).map((x) => x.id), ["d", "a", "b"]);
 });
 
-test("a full plan reads as the waitlist, not an error", () => {
-  assert.equal(submitErrorMessage("plan_full", "Alex"), "You're on the waitlist");
+test("plan_full is a failure message, never a waitlist confirmation", () => {
+  // Nothing was saved on this path; the real confirmation comes from SubmitResult.waitlisted.
+  const msg = submitErrorMessage("plan_full", "Alex");
+  assert.equal(msg, "It just filled up. Try again in a moment.");
+  assert.ok(!/waitlist/i.test(msg));
 });
