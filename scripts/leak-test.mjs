@@ -56,6 +56,17 @@ const normalize = (html) =>
     .replace(/"buildId":"[^"]*"/g, "")
     .replace(/nonce="[^"]*"/g, "");
 
+// Profile filters are applied only in the browser; the server never reads the
+// query string. The one thing allowed to differ is Next echoing the requested
+// URL itself (in its router payload), so strip exactly that query string.
+const FILTER_QS = "category=Trip";
+const stripQuery = (html) =>
+  html
+    // Router tree key for the page segment, e.g. __PAGE__?{\"category\":\"Trip\"} (any escaping).
+    .replace(/__PAGE__\?\{[^}]*\}/g, "__PAGE__")
+    .split(`?${FILTER_QS}`).join("")
+    .split(FILTER_QS).join("");
+
 function firstDiff(a, b) {
   const i = [...a].findIndex((ch, idx) => ch !== b[idx]);
   const at = i === -1 ? Math.min(a.length, b.length) : i;
@@ -84,9 +95,14 @@ try {
     page: await get(`/${owner.username}`),
     og: await get(`/${owner.username}/opengraph-image`),
     missingLink: await get(`/${owner.username}/p/${randomUUID()}`),
+    filtered: await get(`/${owner.username}?${FILTER_QS}`),
   };
   check("public page renders", before.page.status === 200, `HTTP ${before.page.status}`);
   check("OG image renders", before.og.type.startsWith("image/"), before.og.type);
+  {
+    const [plain, filtered] = [stripQuery(normalize(before.page.body)), stripQuery(normalize(before.filtered.body))];
+    check(`signed-out profile identical with vs without ?${FILTER_QS} (no private plans yet)`, plain === filtered, plain === filtered ? "" : firstDiff(plain, filtered));
+  }
 
   // ---- Add unlisted + circle plans and a circle with one member ----
   const { data: unl } = await owner.client
@@ -113,10 +129,19 @@ try {
     page: await get(`/${owner.username}`),
     og: await get(`/${owner.username}/opengraph-image`),
     circleLink: await get(`/${owner.username}/p/${sec.id}`),
+    filtered: await get(`/${owner.username}?${FILTER_QS}`),
   };
   const [pb, pa] = [normalize(before.page.body), normalize(after.page.body)];
   check("signed-out profile page identical with vs without private plans", pb === pa, pb === pa ? "" : firstDiff(pb, pa));
   check("profile page never contains the circle/unlisted titles", !pa.includes(SECRET) && !pa.includes(UNLISTED));
+  {
+    const fa = normalize(after.filtered.body);
+    const [plain, filtered] = [stripQuery(pa), stripQuery(fa)];
+    check(`signed-out profile identical with vs without ?${FILTER_QS} (with private plans)`, plain === filtered, plain === filtered ? "" : firstDiff(plain, filtered));
+    const fb = stripQuery(normalize(before.filtered.body));
+    check(`signed-out ?${FILTER_QS} profile identical before vs after private plans`, fb === filtered, fb === filtered ? "" : firstDiff(fb, filtered));
+    check(`?${FILTER_QS} profile never contains the circle/unlisted titles`, !fa.includes(SECRET) && !fa.includes(UNLISTED));
+  }
   check("OG image identical with vs without private plans", before.og.body.equals(after.og.body));
   const [mb, ma] = [normalize(before.missingLink.body), normalize(after.circleLink.body)];
   check("signed-out circle plan link identical to a nonexistent plan link", mb === ma, mb === ma ? "" : firstDiff(mb, ma));

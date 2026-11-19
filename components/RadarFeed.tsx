@@ -1,12 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { Lock } from "lucide-react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { Lock, X } from "lucide-react";
 import { PlanCard } from "@/components/PlanCard";
 import { useViewer, useViewerStatus } from "@/components/ViewerContext";
 import { createClient } from "@/lib/supabase/client";
-import { groupByTimeframe, type Plan, type Spots } from "@/lib/types";
+import { CATEGORIES, STATUSES, groupByTimeframe, type Plan, type Spots } from "@/lib/types";
+import {
+  NO_FILTERS,
+  applyFilters,
+  filtersToSearch,
+  hasFilters,
+  parseFilters,
+  type FeedFilters,
+} from "@/lib/feed-filters";
+import { cn } from "@/lib/utils";
 
 export type SharedPlan = Plan & { shared_via: string[] };
 
@@ -33,9 +43,11 @@ export function RadarFeed({
   const { plans: shared, spots: sharedSpots } = useViewerExtras(ownerId, viewer?.id ?? null);
   const spots = { ...publicSpots, ...sharedSpots };
   const sharedVia = new Map(shared.map((p) => [p.id, p.shared_via]));
-  const groups = groupByTimeframe([...publicPlans, ...shared]);
+  const [filters, setFilters] = useFeedFilters();
+  const visible = [...publicPlans, ...shared];
+  const groups = groupByTimeframe(applyFilters(visible, filters));
 
-  if (groups.length === 0) {
+  if (visible.length === 0) {
     return (
       <div className="tap-card mt-8 px-6 py-10 text-center">
         <p className="text-3xl">🛰️</p>
@@ -49,6 +61,10 @@ export function RadarFeed({
 
   return (
     <div className="mt-8 space-y-8">
+      <FilterChips filters={filters} onChange={setFilters} />
+      {groups.length === 0 && (
+        <p className="py-6 text-center text-sm text-muted-foreground">No plans match</p>
+      )}
       {groups.map((group) => (
         <section key={group.timeframe} aria-labelledby={`tf-${group.timeframe}`}>
           <h2
@@ -73,6 +89,83 @@ export function RadarFeed({
         </section>
       ))}
     </div>
+  );
+}
+
+/** Hydrated yet? Always false on the server and during hydration. */
+const noopSubscribe = () => () => {};
+function useHydrated() {
+  return useSyncExternalStore(
+    noopSubscribe,
+    () => true,
+    () => false,
+  );
+}
+
+/**
+ * Filters from ?category=&status=, read only after hydration so the server
+ * render (and the hydration pass) never depend on the query string. Changes go
+ * through history.replaceState, which Next keeps in sync with useSearchParams
+ * without a server round trip.
+ */
+function useFeedFilters(): [FeedFilters, (f: FeedFilters) => void] {
+  const params = useSearchParams();
+  const hydrated = useHydrated();
+  const filters = hydrated ? parseFilters(params) : NO_FILTERS;
+  const setFilters = (f: FeedFilters) => {
+    const search = filtersToSearch(window.location.search, f);
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${search}${window.location.hash}`);
+  };
+  return [filters, setFilters];
+}
+
+function FilterChips({ filters, onChange }: { filters: FeedFilters; onChange: (f: FeedFilters) => void }) {
+  return (
+    <div className="space-y-2" role="group" aria-label="Filter plans">
+      <div className="flex flex-wrap gap-1.5">
+        {CATEGORIES.map((c) => (
+          <Chip
+            key={c}
+            active={filters.category === c}
+            onClick={() => onChange({ ...filters, category: filters.category === c ? null : c })}
+          >
+            {c}
+          </Chip>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {STATUSES.map((s) => (
+          <Chip
+            key={s}
+            active={filters.status === s}
+            onClick={() => onChange({ ...filters, status: filters.status === s ? null : s })}
+          >
+            {s}
+          </Chip>
+        ))}
+        {hasFilters(filters) && (
+          <Chip active={false} onClick={() => onChange(NO_FILTERS)}>
+            <X className="size-3" /> Clear
+          </Chip>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        "inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-xs font-medium transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+        active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background hover:bg-muted",
+      )}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -127,11 +220,16 @@ function useViewerExtras(ownerId: string, viewerId: string | null): Extras {
  */
 export function SharedSignInPrompt({ next, className }: { next: string; className?: string }) {
   const status = useViewerStatus();
+  // Built in the browser so signing in returns to the same (filtered) view.
+  // status is only ever "signed_out" after hydration, so the server never uses these.
+  const pathname = usePathname();
+  const search = useSearchParams()?.toString();
   if (status !== "signed_out") return null;
+  const returnTo = pathname ? `${pathname}${search ? `?${search}` : ""}` : next;
   return (
     <p className={className}>
       <Link
-        href={`/login?next=${encodeURIComponent(next)}`}
+        href={`/login?next=${encodeURIComponent(returnTo)}`}
         className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
       >
         <Lock className="size-3" /> Sign in to see plans shared with you
