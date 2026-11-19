@@ -49,6 +49,8 @@ export type Plan = {
   /** All-day "YYYY-MM-DD", optional; end_date is inclusive. */
   start_date: string | null;
   end_date: string | null;
+  /** Public hint that the dates can move (never on carpools). */
+  dates_flexible: boolean;
   /** Optional number of spots; requests then need the owner's approval. */
   capacity: number | null;
   /** Carpools: public route and departure (instant + the zone it was entered in). */
@@ -183,6 +185,7 @@ export type PlanInput = Pick<
   | "specific_dates"
   | "start_date"
   | "end_date"
+  | "dates_flexible"
   | "status"
   | "notes"
   | "visibility"

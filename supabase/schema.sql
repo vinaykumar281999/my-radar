@@ -90,6 +90,13 @@ alter table public.plans add constraint plans_carpool_fields
     and departs_at is not null and departs_tz is not null
   ));
 
+-- "Flexible on dates": a public hint that the dates can move. Carpools leave
+-- at a fixed time, so they're never flexible.
+alter table public.plans add column if not exists dates_flexible boolean not null default false;
+alter table public.plans drop constraint if exists plans_flexible_not_carpool;
+alter table public.plans add constraint plans_flexible_not_carpool
+  check (not (dates_flexible and category = 'Carpool'));
+
 alter table public.plans drop constraint if exists plans_dates_order;
 alter table public.plans add constraint plans_dates_order
   check (end_date is null or (start_date is not null and end_date >= start_date));

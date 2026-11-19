@@ -458,6 +458,7 @@ function ManagePlanRow({
               : plan.start_date
                 ? formatDateRange(plan.start_date, plan.end_date)
                 : `${plan.timeframe}${plan.specific_dates ? ` · ${plan.specific_dates}` : ""}`}
+            {plan.dates_flexible && plan.category !== "Carpool" && " · dates flexible"}
           </p>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {plan.visibility === "circles" && (

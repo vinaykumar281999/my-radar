@@ -15,6 +15,11 @@ select t.throws($$insert into plans (user_id, title, category, timeframe) values
 insert into plans (id, user_id, title, category, timeframe, capacity, origin, destination, departs_at, departs_tz) values
   (:CAR, :A, 'Ride to Tahoe', 'Carpool', 'This Month', 3, 'SF', 'Tahoe', '2026-12-04 15:30:00-08', 'America/Los_Angeles');
 insert into plan_private_details (plan_id, owner_id, pickup_details, owner_contact) values (:CAR, :A, '24th St BART, north exit', '+1 555 000 1111');
+select t.throws($$update plans set dates_flexible = true where id = 'f1f1f1f1-0000-0000-0000-000000000001'$$,
+  'plans_flexible_not_carpool', 'carpools can''t be flexible on dates');
+insert into plans (user_id, title, category, timeframe, dates_flexible) values (auth.uid(), 'Flexible trip', 'Trip', 'This Month', true);
+select t.eq((select dates_flexible from get_public_plan((select id from plans where title = 'Flexible trip'))), true, 'get_public_plan returns dates_flexible');
+delete from plans where title = 'Flexible trip';
 reset role;
 set role service_role;
 select t.throws($$insert into plan_pitches (target_user_id, title, category, timeframe, pitcher_name, pitcher_handle)

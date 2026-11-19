@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { CalendarDays, Check, CopyPlus, Loader2, UsersRound } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { CategoryLabel, ChainPill, StatusPill } from "@/components/plan-meta";
+import { CategoryLabel, ChainPill, FlexibleDatesLabel, StatusPill } from "@/components/plan-meta";
 import { InterestModal } from "@/components/InterestModal";
 import { AddToCalendar } from "@/components/AddToCalendar";
 import { formatDateRange, formatDeparture } from "@/lib/dates";
@@ -34,6 +34,7 @@ type PlanCardProps = {
         | "chained_from_plan_id"
         | "start_date"
         | "end_date"
+        | "dates_flexible"
         | "visibility"
         | "capacity"
         | "origin"
@@ -100,6 +101,8 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
           {plan.start_date ? formatDateRange(plan.start_date, plan.end_date) : plan.specific_dates}
         </p>
       )}
+
+      {plan.dates_flexible && !isCarpool && <FlexibleDatesLabel className="mt-1.5 ml-2 first:ml-0" />}
 
       {plan.notes && <p className="mt-2 text-sm leading-relaxed text-foreground/80">{plan.notes}</p>}
 
@@ -195,6 +198,7 @@ function CopyToRadarButton({
         specific_dates: plan.specific_dates,
         start_date: plan.start_date ?? null,
         end_date: plan.end_date ?? null,
+        dates_flexible: plan.dates_flexible ?? false,
         notes: plan.notes,
         status: "Just an Idea",
         chained_from_plan_id: plan.id,

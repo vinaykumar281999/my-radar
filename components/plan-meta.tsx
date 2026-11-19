@@ -69,6 +69,20 @@ export function StatusPill({ status, className }: { status: Status; className?: 
   );
 }
 
+/** Small "Dates flexible" label for plans whose dates can move. */
+export function FlexibleDatesLabel({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground",
+        className,
+      )}
+    >
+      Dates flexible
+    </span>
+  );
+}
+
 /** Subtle "🔗 Chained with @handle" pill for plans that came from a pitch or a copy. */
 export function ChainPill({
   plan,

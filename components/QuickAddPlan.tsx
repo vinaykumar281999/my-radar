@@ -34,6 +34,8 @@ import {
   type PlanPrivateDetails,
 } from "@/lib/types";
 import { localTimeZone, utcToZonedInput, zonedInputToUtc } from "@/lib/dates";
+import { withCategory } from "@/lib/plan-form";
+import { PLAN_TEMPLATES, applyTemplate, type PlanTemplate } from "@/lib/templates";
 
 type QuickAddPlanProps = {
   open: boolean;
@@ -56,6 +58,7 @@ const EMPTY: PlanInput = {
   specific_dates: "",
   start_date: "",
   end_date: "",
+  dates_flexible: false,
   notes: "",
   visibility: "public",
   capacity: null,
@@ -129,6 +132,7 @@ function PlanForm({
           specific_dates: editing.specific_dates ?? "",
           start_date: editing.start_date ?? "",
           end_date: editing.end_date ?? "",
+          dates_flexible: editing.dates_flexible ?? false,
           notes: editing.notes ?? "",
           visibility: editing.visibility ?? "public",
           capacity: editing.capacity ?? null,
@@ -178,12 +182,15 @@ function PlanForm({
   }, [editingId]);
 
   function setCategory(category: Category) {
-    setForm((f) => ({
-      ...f,
-      category,
-      // Safety default: a new carpool starts shared with circles only.
-      visibility: category === "Carpool" && !editing && f.visibility === "public" ? "circles" : f.visibility,
-    }));
+    // Safety default (see withCategory): a new carpool starts shared with circles only.
+    setForm((f) => withCategory(f, category, !editing));
+  }
+
+  // Fills fields only; nothing is saved until "Post plan". The category goes
+  // through the same withCategory() rule as tapping a category pill.
+  function pickTemplate(template: PlanTemplate) {
+    setForm((f) => applyTemplate(f, template));
+    setError(null);
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -224,6 +231,7 @@ function PlanForm({
       status: form.status,
       start_date: start,
       end_date: end === start ? null : end,
+      dates_flexible: isCarpool ? false : !!form.dates_flexible,
       // Real dates replace the old free-text dates.
       specific_dates: start ? null : form.specific_dates?.trim() || null,
       notes: form.notes?.trim() || null,
@@ -303,6 +311,21 @@ function PlanForm({
 
   return (
     <form onSubmit={onSubmit} className="space-y-5">
+      {!editing && (
+        <div role="group" aria-label="Start from a template" className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+          {PLAN_TEMPLATES.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => pickTemplate(t)}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-dashed px-3 text-sm font-medium transition-colors hover:bg-muted"
+            >
+              <span aria-hidden>{t.emoji}</span> {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="space-y-1.5">
         <Label htmlFor="plan-title">Title</Label>
         <Input
@@ -464,6 +487,15 @@ function PlanForm({
           <p className="col-span-2 -mt-1.5 text-xs text-muted-foreground">
             No dates yet? Leave these empty and the “When” bucket is used. Dated plans can be added to calendars.
           </p>
+          <label className="col-span-2 flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={!!form.dates_flexible}
+              onChange={(e) => set("dates_flexible", e.target.checked)}
+              className="size-4 accent-foreground"
+            />
+            Flexible on dates
+          </label>
         </div>
       )}
 
