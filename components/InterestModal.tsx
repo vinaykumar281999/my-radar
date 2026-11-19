@@ -48,6 +48,9 @@ export function InterestModal({
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
   const [message, setMessage] = useState("");
+  const [canDrive, setCanDrive] = useState(false);
+  const [largeBag, setLargeBag] = useState(false);
+  const isSeat = spotRequest && seatWord === "seat";
   const [trap, setTrap] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,6 +88,7 @@ export function InterestModal({
           name,
           contact,
           message,
+          ...(isSeat ? { canDrive, largeBag } : {}),
           website: trap,
           turnstileToken: await getTurnstileToken(),
         });
@@ -179,6 +183,31 @@ export function InterestModal({
                   className="text-base"
                 />
               </div>
+              {isSeat && (
+                <fieldset className="space-y-2">
+                  <legend className="text-sm font-medium">
+                    For the driver <span className="font-normal text-muted-foreground">(only {firstName} sees these)</span>
+                  </legend>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={canDrive}
+                      onChange={(e) => setCanDrive(e.target.checked)}
+                      className="size-4 accent-foreground"
+                    />
+                    I can take a turn driving
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={largeBag}
+                      onChange={(e) => setLargeBag(e.target.checked)}
+                      className="size-4 accent-foreground"
+                    />
+                    I&apos;m bringing a big bag
+                  </label>
+                </fieldset>
+              )}
               {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
               {!demo && <div ref={turnstileRef} />}
             </div>

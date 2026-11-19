@@ -40,6 +40,9 @@ export type InterestInput = Common & {
   name: string;
   contact: string;
   message: string;
+  /** Carpool seat requests only; guard_interest clears them on other plans. */
+  canDrive?: boolean;
+  largeBag?: boolean;
 };
 
 export type PitchInput = Common & {
@@ -65,9 +68,15 @@ export async function submitInterest(input: InterestInput): Promise<SubmitResult
     // user against the plan's circles and answers plan_unavailable otherwise,
     // the same as for a plan that doesn't exist.
     const userId = await signedInProfileId(db);
-    return db
-      .from("interests")
-      .insert({ plan_id: planId, visitor_name: name, contact_handle: contact, message, user_id: userId });
+    return db.from("interests").insert({
+      plan_id: planId,
+      visitor_name: name,
+      contact_handle: contact,
+      message,
+      user_id: userId,
+      can_drive: input.canDrive === true,
+      large_bag: input.largeBag === true,
+    });
   });
 }
 

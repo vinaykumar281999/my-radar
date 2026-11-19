@@ -103,8 +103,22 @@ export type Interest = {
   message: string | null;
   status: InterestStatus;
   user_id: string | null;
+  /** Carpool requests only (always false elsewhere). */
+  can_drive: boolean;
+  large_bag: boolean;
   created_at: string;
 };
+
+/** "2 riders can also drive · 1 big bag" for a carpool's riders. */
+export function riderFlagSummary(riders: Pick<Interest, "can_drive" | "large_bag">[]) {
+  const drive = riders.filter((r) => r.can_drive).length;
+  const bags = riders.filter((r) => r.large_bag).length;
+  const parts = [
+    drive ? `${drive} ${drive === 1 ? "rider" : "riders"} can also drive` : null,
+    bags ? `${bags} big ${bags === 1 ? "bag" : "bags"}` : null,
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
 
 export type PitchStatus = "pending" | "accepted" | "dismissed";
 
@@ -202,6 +216,8 @@ export type PlanPrivateDetails = {
   owner_id: string;
   pickup_details: string | null;
   owner_contact: string | null;
+  /** Driver's note to approved riders. */
+  rider_note: string | null;
 };
 
 export const USERNAME_RE = /^[a-z0-9_]{3,30}$/;

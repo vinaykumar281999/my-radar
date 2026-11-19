@@ -148,7 +148,11 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
         )}
       </div>
 
-      {isCarpool && request === "approved" && <CarpoolDetails planId={plan.id} />}
+      {isCarpool && !demo && viewer && plan.user_id === viewer.id ? (
+        <CarpoolDetails planId={plan.id} isOwner />
+      ) : (
+        isCarpool && request === "approved" && <CarpoolDetails planId={plan.id} />
+      )}
 
       {plan.start_date && !demo && (
         <AddToCalendar

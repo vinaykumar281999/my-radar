@@ -19,7 +19,15 @@ import { parseContact } from "@/lib/contact";
 import { csvFilename, downloadCsv, toCsv } from "@/lib/csv";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { countLeads, type BlockResult, type Interest, type InterestStatus, type LeadCounts, type Plan } from "@/lib/types";
+import {
+  countLeads,
+  riderFlagSummary,
+  type BlockResult,
+  type Interest,
+  type InterestStatus,
+  type LeadCounts,
+  type Plan,
+} from "@/lib/types";
 
 type LeadsDrawerProps = {
   plan: Plan | null;
@@ -43,6 +51,8 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
   const [bulkPending, setBulkPending] = useState(false);
 
   const hasSpots = plan?.capacity != null;
+  const isCarpool = plan?.category === "Carpool";
+  const riderSummary = isCarpool ? riderFlagSummary((leads ?? []).filter((l) => l.status === "approved")) : "";
   // Requests waiting for a decision first, then approved, then the rest.
   const visible = (leads ?? [])
     .filter((l) => matchesQuery(query, [l.visitor_name, l.contact_handle, l.message]))
@@ -125,8 +135,16 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
 
   function exportCsv() {
     const csv = toCsv(
-      ["Received", "Name", "Contact", "Note", "Plan", "Status"],
-      visible.map((l) => [l.created_at, l.visitor_name, l.contact_handle, l.message, plan?.title, l.status]),
+      ["Received", "Name", "Contact", "Note", "Plan", "Status", ...(isCarpool ? ["Can drive", "Big bag"] : [])],
+      visible.map((l) => [
+        l.created_at,
+        l.visitor_name,
+        l.contact_handle,
+        l.message,
+        plan?.title,
+        l.status,
+        ...(isCarpool ? [l.can_drive ? "yes" : "", l.large_bag ? "yes" : ""] : []),
+      ]),
     );
     downloadCsv(csvFilename(hasSpots ? "requests" : "interested"), csv);
   }
@@ -142,6 +160,7 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
           {hasSpots && plan?.capacity != null && leads && (
             <SpotsMeter capacity={plan.capacity} taken={counts.approved_count} waiting={counts.pending_count} />
           )}
+          {riderSummary && <p className="mt-1.5 text-xs font-medium">Approved riders: {riderSummary}</p>}
         </DrawerHeader>
 
         {leads && leads.length > 0 && (
@@ -235,9 +254,10 @@ function LeadRow({
         />
         <div className="min-w-0 flex-1">
           <p className="font-semibold">{lead.visitor_name}</p>
-          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
             {timeAgo(lead.created_at)}
             {onStatus && <RequestStatusPill status={lead.status} />}
+            <RiderFlags lead={lead} />
           </p>
         </div>
         <BlockButton contact={lead.contact_handle} onBlocked={onBlocked} />
@@ -270,6 +290,24 @@ function LeadRow({
       )}
       {onStatus && <RequestActions lead={lead} onStatus={onStatus} />}
     </li>
+  );
+}
+
+/** "Can drive" / "Big bag" badges (only ever set on carpool requests). */
+export function RiderFlags({ lead }: { lead: Pick<Interest, "can_drive" | "large_bag"> }) {
+  return (
+    <>
+      {lead.can_drive && (
+        <span className="rounded-full bg-sky-100 px-1.5 py-px text-[10px] font-bold tracking-wide text-sky-800 uppercase dark:bg-sky-500/15 dark:text-sky-300">
+          Can drive
+        </span>
+      )}
+      {lead.large_bag && (
+        <span className="rounded-full bg-muted px-1.5 py-px text-[10px] font-bold tracking-wide text-muted-foreground uppercase">
+          Big bag
+        </span>
+      )}
+    </>
   );
 }
 

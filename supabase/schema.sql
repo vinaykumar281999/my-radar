@@ -215,6 +215,12 @@ alter table public.interests
     check (status in ('interested', 'pending', 'approved', 'declined'));
 create index if not exists interests_plan_status_idx on public.interests (plan_id, status);
 
+-- Carpool rider flags, set by the rider when requesting a seat. They live on
+-- interests, so the same rules apply: a requester reads only their own row,
+-- the owner reads everyone's. guard_interest clears them on other plans.
+alter table public.interests add column if not exists can_drive boolean not null default false;
+alter table public.interests add column if not exists large_bag boolean not null default false;
+
 -- Helpers below are SECURITY DEFINER so RLS policies can use them without
 -- recursing through each other's policies. The ones callable by clients only
 -- ever answer about the caller (auth.uid()), never about another user.
@@ -729,6 +735,12 @@ begin
   -- to that account, so it has to be a real, identifiable person.
   if v_category = 'Carpool' and new.user_id is null then
     raise exception 'sign_in_required' using errcode = 'P0001';
+  end if;
+
+  -- Rider flags only mean something on a carpool; anywhere else they're ignored.
+  if v_category <> 'Carpool' then
+    new.can_drive := false;
+    new.large_bag := false;
   end if;
 
   -- Status is never chosen by the sender: a request on a plan with spots
@@ -1383,6 +1395,11 @@ create table if not exists public.plan_private_details (
   updated_at      timestamptz not null default now(),
   foreign key (plan_id, owner_id) references public.plans (id, user_id) on delete cascade
 );
+
+-- A note from the driver to approved riders ("bring chains", "leaving 10 min early").
+-- Same row, so the same two policies below are its only gate.
+alter table public.plan_private_details add column if not exists rider_note text
+  check (rider_note is null or char_length(rider_note) <= 280);
 
 alter table public.plan_private_details enable row level security;
 revoke all on public.plan_private_details from anon;

@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { PillGroup } from "@/components/PillGroup";
 import { CATEGORY_ICONS, STATUS_STYLES } from "@/components/plan-meta";
 import { createClient } from "@/lib/supabase/client";
@@ -149,7 +150,7 @@ function PlanForm({
   const [departure, setDeparture] = useState(() =>
     editing?.departs_at && editing.departs_tz ? utcToZonedInput(editing.departs_at, editing.departs_tz) : "",
   );
-  const [privateDetails, setPrivateDetails] = useState({ pickup: "", contact: "", loaded: !editing });
+  const [privateDetails, setPrivateDetails] = useState({ pickup: "", contact: "", note: "", loaded: !editing });
   const [confirmPublic, setConfirmPublic] = useState(!!editing && editing.category === "Carpool" && editing.visibility === "public");
   const isCarpool = form.category === "Carpool";
   const [pending, setPending] = useState(false);
@@ -173,7 +174,12 @@ function PlanForm({
       .maybeSingle<PlanPrivateDetails>()
       .then(({ data }) => {
         if (!cancelled) {
-          setPrivateDetails({ pickup: data?.pickup_details ?? "", contact: data?.owner_contact ?? "", loaded: true });
+          setPrivateDetails({
+            pickup: data?.pickup_details ?? "",
+            contact: data?.owner_contact ?? "",
+            note: data?.rider_note ?? "",
+            loaded: true,
+          });
         }
       });
     return () => {
@@ -282,13 +288,15 @@ function PlanForm({
     // Carpool pickup / contact live in their own owner-only table.
     const pickup = privateDetails.pickup.trim();
     const contact = privateDetails.contact.trim();
+    const riderNote = privateDetails.note.trim().slice(0, 280);
     const details =
-      isCarpool && (pickup || contact)
+      isCarpool && (pickup || contact || riderNote)
         ? await supabase.from("plan_private_details").upsert({
             plan_id: data.id,
             owner_id: userId,
             pickup_details: pickup || null,
             owner_contact: contact || null,
+            rider_note: riderNote || null,
             updated_at: new Date().toISOString(),
           })
         : editing
@@ -364,13 +372,16 @@ function PlanForm({
           seats={form.capacity}
           pickup={privateDetails.pickup}
           contact={privateDetails.contact}
+          note={privateDetails.note}
           detailsLoaded={privateDetails.loaded}
           onChange={(change) => {
             if ("origin" in change) set("origin", change.origin ?? "");
             if ("destination" in change) set("destination", change.destination ?? "");
             if ("seats" in change) set("capacity", change.seats ?? null);
             if ("departure" in change) setDeparture(change.departure ?? "");
-            if ("pickup" in change || "contact" in change) setPrivateDetails((d) => ({ ...d, ...change }));
+            if ("pickup" in change || "contact" in change || "note" in change) {
+              setPrivateDetails((d) => ({ ...d, ...change }));
+            }
           }}
         />
       ) : (
@@ -578,6 +589,7 @@ type CarpoolChange = Partial<{
   seats: number | null;
   pickup: string;
   contact: string;
+  note: string;
 }>;
 
 /** Route, departure and seats (public to whoever sees the plan) + pickup and contact (approved riders only). */
@@ -589,6 +601,7 @@ function CarpoolFields({
   seats,
   pickup,
   contact,
+  note,
   detailsLoaded,
   onChange,
 }: {
@@ -599,6 +612,7 @@ function CarpoolFields({
   seats: number | null;
   pickup: string;
   contact: string;
+  note: string;
   detailsLoaded: boolean;
   onChange: (change: CarpoolChange) => void;
 }) {
@@ -685,6 +699,24 @@ function CarpoolFields({
             disabled={!detailsLoaded}
             maxLength={60}
             className="h-11 text-base"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <div className="flex items-baseline justify-between">
+            <Label htmlFor="carpool-note">
+              Note to riders <span className="font-normal text-muted-foreground">(optional)</span>
+            </Label>
+            <span className="text-xs text-muted-foreground tabular-nums">{note.length}/280</span>
+          </div>
+          <Textarea
+            id="carpool-note"
+            value={note}
+            onChange={(e) => onChange({ note: e.target.value })}
+            placeholder={detailsLoaded ? "Bring snow chains. Leaving 10 min early if traffic." : "Loading…"}
+            disabled={!detailsLoaded}
+            maxLength={280}
+            rows={2}
+            className="text-base"
           />
         </div>
       </div>
