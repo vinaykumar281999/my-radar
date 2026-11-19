@@ -31,7 +31,8 @@ type InterestModalProps = {
   spotRequest?: boolean;
   /** "spot" or "seat" (carpools). */
   seatWord?: string;
-  onSent?: () => void;
+  /** waitlisted: the plan was full and the request joined the waitlist. */
+  onSent?: (result: { waitlisted: boolean }) => void;
 };
 
 export function InterestModal({
@@ -55,6 +56,7 @@ export function InterestModal({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
+  const [waitlisted, setWaitlisted] = useState(false);
   const { containerRef: turnstileRef, getToken: getTurnstileToken } = useTurnstile();
 
   const firstName = hostName.split(" ")[0] || hostName;
@@ -79,6 +81,7 @@ export function InterestModal({
     }
     setPending(true);
     try {
+      let onWaitlist = false;
       if (trap || demo) {
         // Honeypot filled → bot (or landing-page demo): pretend it worked, save nothing.
         await new Promise((r) => setTimeout(r, 400));
@@ -96,9 +99,11 @@ export function InterestModal({
           setError(submitErrorMessage(result.error, firstName));
           return;
         }
+        onWaitlist = !!result.waitlisted;
       }
+      setWaitlisted(onWaitlist);
       setSent(true);
-      onSent?.();
+      onSent?.({ waitlisted: onWaitlist });
     } catch (err) {
       console.error(err);
       setError("Couldn't send that — please try again.");
@@ -116,11 +121,24 @@ export function InterestModal({
               <PartyPopper className="size-8 animate-in zoom-in-50 duration-500" />
             </div>
             <DrawerTitle className="text-xl font-bold">
-              {spotRequest ? `Requested! ${firstName} will confirm your ${seatWord}.` : `Sent! ${firstName} knows you're down.`}
+              {waitlisted
+                ? "You're on the waitlist"
+                : spotRequest
+                  ? `Requested! ${firstName} will confirm your ${seatWord}.`
+                  : `Sent! ${firstName} knows you're down.`}
             </DrawerTitle>
             <DrawerDescription>
-              They&apos;ll reach out on <span className="font-medium text-foreground">{contact}</span>{" "}
-              before booking <span className="font-medium text-foreground">{planTitle}</span>.
+              {waitlisted ? (
+                <>
+                  If a {seatWord} opens up on <span className="font-medium text-foreground">{planTitle}</span>, your
+                  request moves up in line and {firstName} can confirm it.
+                </>
+              ) : (
+                <>
+                  They&apos;ll reach out on <span className="font-medium text-foreground">{contact}</span>{" "}
+                  before booking <span className="font-medium text-foreground">{planTitle}</span>.
+                </>
+              )}
             </DrawerDescription>
             <Button className="mt-4 h-11 w-full rounded-xl" onClick={() => handleOpenChange(false)}>
               Done

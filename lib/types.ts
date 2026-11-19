@@ -93,7 +93,8 @@ export function countLeads(leads: Pick<Interest, "status">[]): LeadCounts {
 /** Spots for a plan with capacity; taken = approved requests. */
 export type Spots = { capacity: number; taken: number };
 
-export type InterestStatus = "interested" | "pending" | "approved" | "declined";
+/** "waitlisted": the plan was full; promote_waitlist moves people to "pending" in order. */
+export type InterestStatus = "interested" | "pending" | "approved" | "declined" | "waitlisted";
 
 export type Interest = {
   id: string;
@@ -106,8 +107,17 @@ export type Interest = {
   /** Carpool requests only (always false elsewhere). */
   can_drive: boolean;
   large_bag: boolean;
+  /** Set when this request was moved from the waitlist to pending. */
+  promoted_at: string | null;
   created_at: string;
 };
+
+/** The owner's waitlist in line order (created_at, then id), like promote_waitlist. */
+export function waitlistOrder<T extends Pick<Interest, "id" | "status" | "created_at">>(leads: T[]): T[] {
+  return leads
+    .filter((l) => l.status === "waitlisted")
+    .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+}
 
 /** "2 riders can also drive · 1 big bag" for a carpool's riders. */
 export function riderFlagSummary(riders: Pick<Interest, "can_drive" | "large_bag">[]) {

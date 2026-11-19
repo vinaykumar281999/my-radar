@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Copy, Loader2, MessageCircle, Trash2, Undo2, Users, X } from "lucide-react";
+import { ArrowUp, Check, Copy, Hourglass, Loader2, MessageCircle, Trash2, Undo2, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import {
   countLeads,
   riderFlagSummary,
+  waitlistOrder,
   type BlockResult,
   type Interest,
   type InterestStatus,
@@ -49,6 +50,10 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [bulkPending, setBulkPending] = useState(false);
+  // Bumped after a decline / removal / block: the database may have promoted
+  // someone from the waitlist, so reload instead of guessing.
+  const [reloadKey, setReloadKey] = useState(0);
+  const reloadIfSpots = () => hasSpots && setReloadKey((k) => k + 1);
 
   const hasSpots = plan?.capacity != null;
   const isCarpool = plan?.category === "Carpool";
@@ -57,6 +62,10 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
   const visible = (leads ?? [])
     .filter((l) => matchesQuery(query, [l.visitor_name, l.contact_handle, l.message]))
     .sort((a, b) => (hasSpots ? STATUS_ORDER[a.status] - STATUS_ORDER[b.status] : 0));
+  // The waitlist gets its own section, in line order (as promote_waitlist sees it).
+  const inLine = waitlistOrder(visible);
+  const notWaiting = visible.filter((l) => l.status !== "waitlisted");
+  const waitlistTotal = (leads ?? []).filter((l) => l.status === "waitlisted").length;
   const selectedVisible = visible.filter((l) => selected.has(l.id));
   const counts = countLeads(leads ?? []);
 
@@ -69,6 +78,7 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
 
   function setStatus(id: string, status: InterestStatus) {
     setLeads((leads ?? []).map((l) => (l.id === id ? { ...l, status } : l)));
+    if (status === "declined") reloadIfSpots();
   }
 
   useEffect(() => {
@@ -91,7 +101,7 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
     return () => {
       cancelled = true;
     };
-  }, [planId, onCountChange]);
+  }, [planId, onCountChange, reloadKey]);
 
   async function removeLeads(ids: string[]) {
     if (!planId || ids.length === 0) return false;
@@ -104,6 +114,7 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
       toast.error(ids.length === 1 ? "Couldn't remove that one." : "Couldn't remove those.");
       return false;
     }
+    reloadIfSpots();
     return true;
   }
 
@@ -131,6 +142,7 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
     const removed = new Set(result.interests.map((i) => i.id));
     setLeads((leads ?? []).filter((l) => !removed.has(l.id)));
     onBlocked(result);
+    reloadIfSpots();
   }
 
   function exportCsv() {
@@ -158,7 +170,12 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
           </DrawerTitle>
           <DrawerDescription className="text-left">{plan?.title}</DrawerDescription>
           {hasSpots && plan?.capacity != null && leads && (
-            <SpotsMeter capacity={plan.capacity} taken={counts.approved_count} waiting={counts.pending_count} />
+            <SpotsMeter
+              capacity={plan.capacity}
+              taken={counts.approved_count}
+              waiting={counts.pending_count}
+              waitlist={waitlistTotal}
+            />
           )}
           {riderSummary && <p className="mt-1.5 text-xs font-medium">Approved riders: {riderSummary}</p>}
         </DrawerHeader>
@@ -195,19 +212,48 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
           ) : visible.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">No one matches “{query}”.</p>
           ) : (
-            <ul className="space-y-3">
-              {visible.map((lead) => (
-                <LeadRow
-                  key={lead.id}
-                  lead={lead}
-                  selected={selected.has(lead.id)}
-                  onToggle={() => toggle(lead.id)}
-                  onRemove={() => removeLeads([lead.id])}
-                  onBlocked={handleBlocked}
-                  onStatus={hasSpots ? (status) => setStatus(lead.id, status) : undefined}
-                />
-              ))}
-            </ul>
+            <>
+              <ul className="space-y-3">
+                {notWaiting.map((lead) => (
+                  <LeadRow
+                    key={lead.id}
+                    lead={lead}
+                    selected={selected.has(lead.id)}
+                    onToggle={() => toggle(lead.id)}
+                    onRemove={() => removeLeads([lead.id])}
+                    onBlocked={handleBlocked}
+                    onStatus={hasSpots ? (status) => setStatus(lead.id, status) : undefined}
+                  />
+                ))}
+              </ul>
+              {inLine.length > 0 && (
+                <section aria-labelledby="waitlist-heading" className={cn(notWaiting.length > 0 && "mt-6")}>
+                  <h3
+                    id="waitlist-heading"
+                    className="mb-2 flex items-center gap-1.5 text-xs font-bold tracking-widest text-muted-foreground uppercase"
+                  >
+                    <Hourglass className="size-3.5" /> Waitlist
+                  </h3>
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    When a spot frees up, the next person moves to Pending for you to approve.
+                  </p>
+                  <ol className="space-y-3">
+                    {inLine.map((lead, i) => (
+                      <LeadRow
+                        key={lead.id}
+                        lead={lead}
+                        place={i + 1}
+                        selected={selected.has(lead.id)}
+                        onToggle={() => toggle(lead.id)}
+                        onRemove={() => removeLeads([lead.id])}
+                        onBlocked={handleBlocked}
+                        onStatus={(status) => setStatus(lead.id, status)}
+                      />
+                    ))}
+                  </ol>
+                </section>
+              )}
+            </>
           )}
         </div>
       </DrawerContent>
@@ -217,6 +263,7 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
 
 function LeadRow({
   lead,
+  place,
   selected,
   onToggle,
   onRemove,
@@ -224,6 +271,8 @@ function LeadRow({
   onStatus,
 }: {
   lead: Interest;
+  /** Position in the waitlist section (1 = next). */
+  place?: number;
   selected: boolean;
   onToggle: () => void;
   onRemove: () => void;
@@ -253,10 +302,18 @@ function LeadRow({
           className="mt-1 size-4 shrink-0 accent-foreground"
         />
         <div className="min-w-0 flex-1">
-          <p className="font-semibold">{lead.visitor_name}</p>
+          <p className="font-semibold">
+            {place && <span className="mr-1.5 text-muted-foreground tabular-nums">#{place}</span>}
+            {lead.visitor_name}
+          </p>
           <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
             {timeAgo(lead.created_at)}
             {onStatus && <RequestStatusPill status={lead.status} />}
+            {lead.status === "pending" && lead.promoted_at && (
+              <span className="inline-flex items-center gap-0.5 rounded-full bg-violet-100 px-1.5 py-px text-[10px] font-bold tracking-wide text-violet-800 uppercase dark:bg-violet-500/15 dark:text-violet-300">
+                <ArrowUp className="size-2.5" /> Promoted from waitlist
+              </span>
+            )}
             <RiderFlags lead={lead} />
           </p>
         </div>
@@ -311,16 +368,28 @@ export function RiderFlags({ lead }: { lead: Pick<Interest, "can_drive" | "large
   );
 }
 
-const STATUS_ORDER: Record<InterestStatus, number> = { pending: 0, approved: 1, interested: 2, declined: 3 };
+const STATUS_ORDER: Record<InterestStatus, number> = { pending: 0, approved: 1, waitlisted: 2, interested: 3, declined: 4 };
 
-function SpotsMeter({ capacity, taken, waiting }: { capacity: number; taken: number; waiting: number }) {
+function SpotsMeter({
+  capacity,
+  taken,
+  waiting,
+  waitlist,
+}: {
+  capacity: number;
+  taken: number;
+  waiting: number;
+  waitlist: number;
+}) {
   return (
     <div className="mt-2">
       <div className="flex justify-between text-xs font-medium">
         <span>
           {taken} of {capacity} spots taken
         </span>
-        <span className="text-muted-foreground">{waiting} waiting</span>
+        <span className="text-muted-foreground">
+          {waiting} waiting{waitlist > 0 && ` · ${waitlist} on waitlist`}
+        </span>
       </div>
       <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted" role="presentation">
         <div className="h-full rounded-full bg-foreground transition-all" style={{ width: `${Math.min(100, (taken / capacity) * 100)}%` }} />
@@ -330,14 +399,20 @@ function SpotsMeter({ capacity, taken, waiting }: { capacity: number; taken: num
 }
 
 function RequestStatusPill({ status }: { status: InterestStatus }) {
-  const label = { pending: "Waiting", approved: "Approved", declined: "Declined", interested: "Interested" }[status];
+  const label = {
+    pending: "Waiting",
+    approved: "Approved",
+    declined: "Declined",
+    interested: "Interested",
+    waitlisted: "Waitlist",
+  }[status];
   return (
     <span
       className={cn(
         "rounded-full px-1.5 py-px text-[10px] font-bold tracking-wide uppercase",
         status === "approved" && "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300",
         status === "pending" && "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300",
-        (status === "declined" || status === "interested") && "bg-muted text-muted-foreground",
+        (status === "declined" || status === "interested" || status === "waitlisted") && "bg-muted text-muted-foreground",
       )}
     >
       {label}

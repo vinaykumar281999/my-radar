@@ -215,6 +215,15 @@ alter table public.interests
     check (status in ('interested', 'pending', 'approved', 'declined'));
 create index if not exists interests_plan_status_idx on public.interests (plan_id, status);
 
+-- Waitlist: requests on a full plan wait in line (created_at, id) and are
+-- promoted to 'pending' (never straight to 'approved') as room frees up.
+alter table public.interests drop constraint if exists interests_status_check;
+alter table public.interests add constraint interests_status_check
+  check (status in ('interested', 'pending', 'approved', 'declined', 'waitlisted'));
+-- Set when promote_waitlist moved this request from the waitlist to pending.
+alter table public.interests add column if not exists promoted_at timestamptz;
+create index if not exists interests_waitlist_idx on public.interests (plan_id, created_at, id) where status = 'waitlisted';
+
 -- Carpool rider flags, set by the rider when requesting a seat. They live on
 -- interests, so the same rules apply: a requester reads only their own row,
 -- the owner reads everyone's. guard_interest clears them on other plans.
@@ -744,12 +753,17 @@ begin
   end if;
 
   -- Status is never chosen by the sender: a request on a plan with spots
-  -- starts pending (and is refused once it's full), otherwise it's interest.
+  -- starts pending, or joins the waitlist once the plan is full (counting
+  -- approved requests) or someone is already waiting (no jumping the line).
+  -- Plans without spots never waitlist: it's plain interest.
+  new.promoted_at := null;
   if v_capacity is not null then
-    if (select count(*) from public.interests i where i.plan_id = new.plan_id and i.status = 'approved') >= v_capacity then
-      raise exception 'plan_full' using errcode = 'P0001';
+    if (select count(*) from public.interests i where i.plan_id = new.plan_id and i.status = 'approved') >= v_capacity
+       or exists (select 1 from public.interests i where i.plan_id = new.plan_id and i.status = 'waitlisted') then
+      new.status := 'waitlisted';
+    else
+      new.status := 'pending';
     end if;
-    new.status := 'pending';
   else
     new.status := 'interested';
   end if;
@@ -1320,11 +1334,20 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  v_plan_id uuid;
 begin
-  update public.interests i
-     set status = 'declined'
-    from public.plans p
-   where i.id = p_interest_id and p.id = i.plan_id and p.user_id = auth.uid() and p.capacity is not null;
+  select i.plan_id into v_plan_id
+    from public.interests i
+    join public.plans p on p.id = i.plan_id
+   where i.id = p_interest_id and p.user_id = auth.uid() and p.capacity is not null;
+  if not found then
+    raise exception 'request_not_found' using errcode = 'P0002';
+  end if;
+  -- Plan row first, like approve_spot and promote_waitlist, so they queue in
+  -- the same order (no deadlocks) and the promotion this triggers is serialized.
+  perform 1 from public.plans where id = v_plan_id for update;
+  update public.interests set status = 'declined' where id = p_interest_id;
   if not found then
     raise exception 'request_not_found' using errcode = 'P0002';
   end if;
@@ -1380,6 +1403,142 @@ drop trigger if exists plans_guard_capacity on public.plans;
 create trigger plans_guard_capacity
   before update of capacity on public.plans
   for each row execute function public.guard_capacity();
+
+-- -----------------------------------------------------------------------------
+-- Waitlist promotion. Locks the plan row exactly like approve_spot, then, while
+-- approved + pending < capacity, moves the earliest waitlisted request to
+-- 'pending' (the owner still approves). People who can no longer see the plan
+-- (removed from its circle, plan archived) are skipped and stay waitlisted.
+-- Server-only: it runs from the triggers below, never from clients.
+-- -----------------------------------------------------------------------------
+create or replace function public.promote_waitlist(p_plan_id uuid)
+returns int
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_capacity int;
+  v_used     int;
+  v_promoted int := 0;
+  r          record;
+begin
+  select p.capacity into v_capacity from public.plans p where p.id = p_plan_id for update;
+  -- Gone (e.g. the plan is being deleted) or no spots: nothing to do.
+  if not found or v_capacity is null then
+    return 0;
+  end if;
+
+  select count(*) into v_used
+    from public.interests where plan_id = p_plan_id and status in ('approved', 'pending');
+
+  for r in
+    select i.id, i.user_id
+      from public.interests i
+     where i.plan_id = p_plan_id and i.status = 'waitlisted'
+     order by i.created_at, i.id
+       for update
+  loop
+    exit when v_used >= v_capacity;
+    if public.can_user_see_plan(p_plan_id, r.user_id) then
+      update public.interests set status = 'pending', promoted_at = now() where id = r.id;
+      v_used := v_used + 1;
+      v_promoted := v_promoted + 1;
+    end if;
+  end loop;
+  return v_promoted;
+end;
+$$;
+
+revoke all on function public.promote_waitlist(uuid) from public, anon, authenticated;
+
+create or replace function public.interests_promote_waitlist()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  perform public.promote_waitlist(case when tg_op = 'DELETE' then old.plan_id else new.plan_id end);
+  return null;
+end;
+$$;
+
+revoke all on function public.interests_promote_waitlist() from public, anon, authenticated;
+
+-- A spot frees up: declined (decline_spot, incl. taking back an approval) or
+-- deleted (owner delete, block_contact). A new waitlisted request also tries,
+-- in case the only people ahead of it are no longer eligible.
+drop trigger if exists interests_declined_promote on public.interests;
+create trigger interests_declined_promote
+  after update of status on public.interests
+  for each row
+  when (new.status = 'declined' and old.status is distinct from 'declined')
+  execute function public.interests_promote_waitlist();
+
+drop trigger if exists interests_deleted_promote on public.interests;
+create trigger interests_deleted_promote
+  after delete on public.interests
+  for each row
+  when (old.status in ('approved', 'pending'))
+  execute function public.interests_promote_waitlist();
+
+drop trigger if exists interests_waitlisted_promote on public.interests;
+create trigger interests_waitlisted_promote
+  after insert on public.interests
+  for each row
+  when (new.status = 'waitlisted')
+  execute function public.interests_promote_waitlist();
+
+create or replace function public.plans_capacity_promote()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  perform public.promote_waitlist(new.id);
+  return null;
+end;
+$$;
+
+revoke all on function public.plans_capacity_promote() from public, anon, authenticated;
+
+drop trigger if exists plans_capacity_promote on public.plans;
+create trigger plans_capacity_promote
+  after update of capacity on public.plans
+  for each row
+  when (new.capacity > old.capacity)
+  execute function public.plans_capacity_promote();
+
+-- The caller's own place in line on this plan (1 = next), or null if they
+-- aren't waitlisted there (or can no longer see the plan). Counts only people
+-- still eligible to be promoted, and says nothing else about them.
+create or replace function public.my_waitlist_position(p_plan_id uuid)
+returns int
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select (
+    select count(*)::int
+      from public.interests o
+     where o.plan_id = me.plan_id
+       and o.status = 'waitlisted'
+       and (o.created_at, o.id) <= (me.created_at, me.id)
+       and public.can_user_see_plan(o.plan_id, o.user_id)
+  )
+    from public.interests me
+   where auth.uid() is not null
+     and me.plan_id = p_plan_id
+     and me.user_id = auth.uid()
+     and me.status = 'waitlisted'
+     and public.can_user_see_plan(p_plan_id, auth.uid());
+$$;
+
+revoke all on function public.my_waitlist_position(uuid) from public, anon;
+grant execute on function public.my_waitlist_position(uuid) to authenticated;
 
 -- -----------------------------------------------------------------------------
 -- Private plan details (carpool pickup spot, driver contact). A separate table

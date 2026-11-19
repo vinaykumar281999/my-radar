@@ -18,7 +18,8 @@ export type SubmitError =
   | "sign_in_required"
   | "server";
 
-export type SubmitResult = { ok: true } | { ok: false; error: SubmitError };
+/** waitlisted: the plan was full and the request joined its waitlist. */
+export type SubmitResult = { ok: true; waitlisted?: boolean } | { ok: false; error: SubmitError };
 
 /**
  * Shared by both forms: at most this many submissions per IP per window.
@@ -62,22 +63,39 @@ export async function submitInterest(input: InterestInput): Promise<SubmitResult
   const message = text(input.message, 280);
   if (!planId || !name || !contact) return fail("invalid");
 
-  return guarded(input, async (db) => {
+  let waitlisted = false;
+  const result = await guarded(input, async (db) => {
     // Who is sending, from their own session (never from the request body).
     // Circle plans only accept signed-in members: guard_interest checks this
     // user against the plan's circles and answers plan_unavailable otherwise,
     // the same as for a plan that doesn't exist.
     const userId = await signedInProfileId(db);
-    return db.from("interests").insert({
-      plan_id: planId,
-      visitor_name: name,
-      contact_handle: contact,
-      message,
-      user_id: userId,
-      can_drive: input.canDrive === true,
-      large_bag: input.largeBag === true,
-    });
+    const inserted = await db
+      .from("interests")
+      .insert({
+        plan_id: planId,
+        visitor_name: name,
+        contact_handle: contact,
+        message,
+        user_id: userId,
+        can_drive: input.canDrive === true,
+        large_bag: input.largeBag === true,
+      })
+      .select("id")
+      .single<{ id: string }>();
+    if (inserted.error || !inserted.data) return inserted;
+    // Read back after the insert's triggers: a full plan puts the request on
+    // the waitlist (and a waitlisted request may be promoted right away).
+    const { data } = await db
+      .from("interests")
+      .select("status")
+      .eq("id", inserted.data.id)
+      .maybeSingle<{ status: string }>();
+    waitlisted = data?.status === "waitlisted";
+    return { error: null };
   });
+  // Only ever about the sender's own request, on a plan they were allowed to send to.
+  return result.ok && waitlisted ? { ok: true, waitlisted: true } : result;
 }
 
 export async function submitPitch(input: PitchInput): Promise<SubmitResult> {

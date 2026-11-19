@@ -36,8 +36,8 @@ select t.throws($$update plans set capacity = 1 where id = 'f1f1f1f1-0000-0000-0
 reset role;
 
 set role service_role;
-select t.throws($$insert into interests (plan_id, visitor_name, contact_handle) values ('f1f1f1f1-0000-0000-0000-000000000001', 'R4', '@r4')$$,
-  'plan_full', 'new requests refused while full');
+insert into interests (id, plan_id, visitor_name, contact_handle) values ('a1000000-0000-0000-0000-000000000004', :P, 'R4', '@r4');
+select t.eq((select status from interests where id = 'a1000000-0000-0000-0000-000000000004'), 'waitlisted', 'new requests join the waitlist while full');
 reset role;
 
 set role authenticated; select t.as_user(:A);

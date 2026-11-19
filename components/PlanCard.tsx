@@ -22,6 +22,7 @@ const REQUEST_LABEL: Record<InterestStatus, string> = {
   approved: "You're in ✓",
   declined: "Not this time",
   interested: "Sent ✓",
+  waitlisted: "On the waitlist",
 };
 
 type PlanCardProps = {
@@ -64,7 +65,9 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
   const isCarpool = plan.category === "Carpool";
   const left = hasSpots && spots ? Math.max(0, spots.capacity - spots.taken) : null;
   const myRequest = useMyRequest(plan.id, hasSpots && !demo ? (viewer?.id ?? null) : null);
-  const request = sentStatus ?? myRequest;
+  const request = sentStatus ?? myRequest?.status ?? null;
+  // Their own place in line (my_waitlist_position answers only about the caller).
+  const position = !sentStatus || sentStatus === myRequest?.status ? myRequest?.position : null;
   const signedOut = useViewerStatus() === "signed_out";
   const seatWord = isCarpool ? "seat" : "spot";
 
@@ -123,7 +126,7 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
       <div className="mt-4 flex gap-2">
         {request && hasSpots ? (
           <p className="flex h-11 flex-1 items-center justify-center rounded-xl bg-muted text-sm font-semibold">
-            {REQUEST_LABEL[request]}
+            {request === "waitlisted" && position ? `Waitlist #${position}` : REQUEST_LABEL[request]}
           </p>
         ) : isCarpool && signedOut && !demo ? (
           <Button
@@ -137,10 +140,16 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
         ) : (
           <Button
             onClick={() => setOpen(true)}
-            disabled={hasSpots && left === 0}
+            variant={hasSpots && left === 0 ? "outline" : "default"}
             className="h-11 flex-1 rounded-xl text-base font-semibold"
           >
-            {hasSpots ? (left === 0 ? "Full" : isCarpool ? "Request a seat 🚗" : "Request a spot ✋") : "I'm Interested 👋"}
+            {hasSpots
+              ? left === 0
+                ? "Join the waitlist"
+                : isCarpool
+                  ? "Request a seat 🚗"
+                  : "Request a spot ✋"
+              : "I'm Interested 👋"}
           </Button>
         )}
         {canCopy && viewer && hostUsername && (
@@ -172,7 +181,7 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
         demo={demo}
         spotRequest={hasSpots}
         seatWord={seatWord}
-        onSent={() => viewer && setSentStatus(hasSpots ? "pending" : "interested")}
+        onSent={({ waitlisted }) => viewer && setSentStatus(hasSpots ? (waitlisted ? "waitlisted" : "pending") : "interested")}
       />
     </article>
   );
@@ -239,27 +248,40 @@ function CopyToRadarButton({
   );
 }
 
-/** The signed-in viewer's own request on a plan with spots (RLS: only their own row). */
-function useMyRequest(planId: string, viewerId: string | null) {
-  const [loaded, setLoaded] = useState<{ key: string; status: InterestStatus | null } | null>(null);
+type MyRequest = { status: InterestStatus; position: number | null };
+
+/**
+ * The signed-in viewer's own request on a plan with spots (RLS: only their own
+ * row), plus their own waitlist position when they're waiting.
+ */
+function useMyRequest(planId: string, viewerId: string | null): MyRequest | null {
+  const [loaded, setLoaded] = useState<{ key: string; request: MyRequest | null } | null>(null);
   const key = `${planId}:${viewerId}`;
 
   useEffect(() => {
     if (!viewerId) return;
     let cancelled = false;
-    createClient()
-      .from("interests")
-      .select("status")
-      .eq("plan_id", planId)
-      .eq("user_id", viewerId)
-      .maybeSingle<{ status: InterestStatus }>()
-      .then(({ data }) => {
-        if (!cancelled) setLoaded({ key: `${planId}:${viewerId}`, status: data?.status ?? null });
-      });
+    const supabase = createClient();
+    (async () => {
+      const { data } = await supabase
+        .from("interests")
+        .select("status")
+        .eq("plan_id", planId)
+        .eq("user_id", viewerId)
+        .maybeSingle<{ status: InterestStatus }>();
+      let position: number | null = null;
+      if (data?.status === "waitlisted") {
+        const { data: pos } = await supabase.rpc("my_waitlist_position", { p_plan_id: planId });
+        position = typeof pos === "number" ? pos : null;
+      }
+      if (!cancelled) {
+        setLoaded({ key: `${planId}:${viewerId}`, request: data ? { status: data.status, position } : null });
+      }
+    })();
     return () => {
       cancelled = true;
     };
   }, [planId, viewerId]);
 
-  return loaded?.key === key ? loaded.status : null;
+  return loaded?.key === key ? loaded.request : null;
 }
