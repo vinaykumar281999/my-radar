@@ -6,7 +6,7 @@ import { DemoPlanCard } from "@/components/demo/DemoPlanCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { localIsoDate } from "@/lib/dates";
 import { demoPlans } from "@/lib/demo";
-import { TIMEFRAMES } from "@/lib/types";
+import { TIMEFRAMES, type Commitment } from "@/lib/types";
 
 /** The demo profile's plans, grouped like a real profile. Dates come from the viewer's today. */
 export function DemoProfileFeed() {
@@ -20,7 +20,7 @@ export function DemoProfileFeed() {
 function Feed() {
   use(io());
   const plans = demoPlans(localIsoDate());
-  const [joined, setJoined] = useState<Set<string>>(() => new Set());
+  const [choices, setChoices] = useState<Record<string, Commitment>>({});
   const groups = TIMEFRAMES.map((timeframe) => ({ timeframe, plans: plans.filter((p) => p.timeframe === timeframe) })).filter(
     (g) => g.plans.length > 0,
   );
@@ -41,8 +41,8 @@ function Feed() {
               <DemoPlanCard
                 key={plan.id}
                 plan={plan}
-                joined={joined.has(plan.id)}
-                onJoin={() => setJoined((j) => new Set(j).add(plan.id))}
+                choice={choices[plan.id] ?? null}
+                onChoose={(c) => setChoices((cs) => ({ ...cs, [plan.id]: c }))}
               />
             ))}
           </div>

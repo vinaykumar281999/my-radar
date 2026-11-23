@@ -7,7 +7,7 @@ import { DemoPlanCard } from "@/components/demo/DemoPlanCard";
 import { STATUS_STYLES } from "@/components/plan-meta";
 import { localIsoDate } from "@/lib/dates";
 import { DEMO_HOST, demoPlans, demoTabs } from "@/lib/demo";
-import { STATUSES, type Status, type Timeframe } from "@/lib/types";
+import { STATUSES, type Commitment, type Status, type Timeframe } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /**
@@ -76,7 +76,7 @@ export function DemoPhone() {
       </div>
       {/* Out of the flow, so the grid centres the phone itself against the copy. */}
       <p className="absolute inset-x-0 top-full mt-4 text-center text-xs text-muted-foreground">
-        ↑ Try it — tap &ldquo;I&apos;m Interested&rdquo;
+        ↑ Try it — tap &ldquo;I&apos;m in&rdquo; or &ldquo;Maybe&rdquo;
       </p>
     </div>
   );
@@ -88,7 +88,7 @@ function PhoneFeed() {
   const tabs = demoTabs(plans);
   const { status } = use(DemoStatus);
   const [tab, setTab] = useState<Timeframe | "All">("All");
-  const [joined, setJoined] = useState<Set<string>>(() => new Set());
+  const [choices, setChoices] = useState<Record<string, Commitment>>({});
   const visible = tab === "All" ? plans : plans.filter((p) => p.timeframe === tab);
 
   return (
@@ -115,8 +115,8 @@ function PhoneFeed() {
             key={plan.id}
             plan={plan}
             status={plan.id === plans[0].id ? status : plan.status}
-            joined={joined.has(plan.id)}
-            onJoin={() => setJoined((j) => new Set(j).add(plan.id))}
+            choice={choices[plan.id] ?? null}
+            onChoose={(c) => setChoices((cs) => ({ ...cs, [plan.id]: c }))}
             compact
           />
         ))}

@@ -14,8 +14,8 @@ const STEPS = [
   },
   {
     icon: BellRing,
-    title: "Friends tap “I’m Interested”",
-    body: "You see who’s down before anything is booked. No app or account needed for them on public plans.",
+    title: "Friends tap “I’m in” or “Maybe”",
+    body: "You see who’s down (and who’s a maybe) before anything is booked. No app or account needed for them on public plans.",
   },
 ];
 
@@ -26,7 +26,7 @@ const FAQ = [
   },
   {
     q: "Who can see my plans?",
-    a: "You choose per plan. Public plans show on your page to anyone with your link. Unlisted plans only open for people you send the plan’s own link to. Circle plans are visible only to members of the Circles you pick, and only when they’re signed in. Who tapped “I’m Interested”, and how to reach them, is only ever shown to you.",
+    a: "You choose per plan. Public plans show on your page to anyone with your link. Unlisted plans only open for people you send the plan’s own link to. Circle plans are visible only to members of the Circles you pick, and only when they’re signed in. Who tapped “I’m in” or “Maybe”, who voted on dates, and how to reach them, is only ever shown to you.",
   },
   {
     q: "Do friends need an account?",

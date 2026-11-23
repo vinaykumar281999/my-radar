@@ -17,8 +17,9 @@ export type DemoPlan = {
   end_date: string | null;
   /** Extra text after the date, e.g. a time. */
   time?: string;
-  /** People already interested (before the visitor taps). */
+  /** People already "in" and "maybe" (before the visitor taps). */
   interested: number;
+  maybe: number;
   /** Which tab it falls under today. */
   timeframe: Timeframe;
   /** "Sat, Nov 28 · 5:30 AM", "Dec 12–15"… */
@@ -58,6 +59,7 @@ export function demoPlans(today: string): DemoPlan[] {
       end_date: null,
       time: "5:30 AM",
       interested: 3,
+      maybe: 1,
     },
     {
       id: "demo-concert",
@@ -68,6 +70,7 @@ export function demoPlans(today: string): DemoPlan[] {
       start_date: concert,
       end_date: null,
       interested: 2,
+      maybe: 1,
     },
     {
       id: "demo-trip",
@@ -78,6 +81,7 @@ export function demoPlans(today: string): DemoPlan[] {
       start_date: tripStart,
       end_date: tripEnd,
       interested: 0,
+      maybe: 0,
     },
   ];
 
@@ -87,6 +91,12 @@ export function demoPlans(today: string): DemoPlan[] {
     timeframe: effectiveTimeframe({ timeframe: "This Month", created_at: today, start_date: p.start_date }, today),
     when: `${formatDateRange(p.start_date, p.end_date)}${p.time ? ` · ${p.time}` : ""}`,
   }));
+}
+
+/** Counts in the shape the owner's summary uses, with the visitor's own tap added. */
+export function demoCounts(plan: Pick<DemoPlan, "interested" | "maybe">, choice: "in" | "maybe" | null) {
+  const maybe = plan.maybe + (choice === "maybe" ? 1 : 0);
+  return { interest_count: plan.interested + maybe + (choice === "in" ? 1 : 0), maybe_count: maybe };
 }
 
 /** "All" plus only the tabs that have a plan today, in the usual order. */

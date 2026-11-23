@@ -38,7 +38,8 @@ export default function LandingPage() {
             </h1>
             <p className="mx-auto mt-5 max-w-xl text-lg text-pretty text-muted-foreground lg:mx-0">
               Share your upcoming trips, concerts, and weekend plans in one link. Friends tap{" "}
-              <strong className="text-foreground">I&apos;m Interested 👋</strong> before the tickets are booked.
+              <strong className="text-foreground">I&apos;m in 🙌</strong> (or <strong className="text-foreground">Maybe 🤔</strong>) before
+              the tickets are booked.
             </p>
 
             <HandleClaim className="mx-auto mt-8 lg:mx-0" />
