@@ -40,6 +40,11 @@ check("anon INSERT on interests is revoked", revoked(r), describe(r));
 r = await sb.from("plans").insert({ user_id: ZERO, title: "x", category: "Trip", timeframe: "This Month" });
 check("anon cannot insert plans", denied(r), describe(r));
 
+// Poll counts are public on purpose (same visibility as the plan, no names): anon may
+// call plan_poll, and gets nothing for a plan it can't see.
+r = await sb.rpc("plan_poll", { p_plan_ids: [ZERO] });
+check("plan_poll exists; anon gets no rows for an unknown plan", !r.error && Array.isArray(r.data) && r.data.length === 0, describe(r));
+
 // --- Private tables stay private ------------------------------------------------
 for (const table of [
   "plan_pitches",
@@ -55,6 +60,9 @@ for (const table of [
   "plan_private_details",
   "circle_settings",
   "promotion_notice_seen",
+  "plan_date_options",
+  "plan_poll_ballots",
+  "plan_poll_choices",
 ]) {
   r = await sb.from(table).select("*").limit(5);
   check(`anon cannot read ${table}`, unreadable(r), describe(r));
@@ -79,6 +87,8 @@ const rpcDenied = [
   ["create_circle_invite", { p_circle_id: ZERO, p_days: 7, p_max_uses: 1 }],
   ["promote_waitlist", { p_plan_id: ZERO }],
   ["my_waitlist_position", { p_plan_id: ZERO }],
+  ["cast_poll_vote", { p_plan_id: ZERO, p_option_ids: [ZERO], p_name: "x", p_contact: "@x", p_user_id: null }],
+  ["pick_date_option", { p_option_id: ZERO }],
   ["my_promotion_notices", {}],
   ["dismiss_promotion_notice", { p_interest_id: ZERO }],
 ];

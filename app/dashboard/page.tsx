@@ -30,13 +30,16 @@ async function DashboardData() {
   ] = await Promise.all([
     supabase
       .from("plans")
-      // Filtered count embeds: all interests, approved spots, requests awaiting a decision.
-      .select("*, interests(count), approved:interests(count), pending:interests(count)")
+      // Filtered count embeds: all interests, "maybe"s, approved spots, requests awaiting a decision.
+      .select(
+        "*, interests(count), maybe:interests(count), approved:interests(count), pending:interests(count), poll_options:plan_date_options(count), poll_ballots:plan_poll_ballots(count)",
+      )
       .eq("user_id", profile.id)
+      .eq("maybe.commitment", "maybe")
       .eq("approved.status", "approved")
       .eq("pending.status", "pending")
       .order("created_at", { ascending: false })
-      .returns<(Plan & { interests: Count; approved: Count; pending: Count })[]>(),
+      .returns<(Plan & { interests: Count; maybe: Count; approved: Count; pending: Count; poll_options: Count; poll_ballots: Count })[]>(),
     supabase
       .from("plan_pitches")
       .select("*")
@@ -100,9 +103,12 @@ async function DashboardData() {
   const audienceByPlan: Record<string, string[]> = {};
   for (const a of audiences ?? []) (audienceByPlan[a.plan_id] ??= []).push(a.circle_id);
 
-  const plans: PlanWithCount[] = (data ?? []).map(({ interests, approved, pending, ...plan }) => ({
+  const plans: PlanWithCount[] = (data ?? []).map(({ interests, maybe, approved, pending, poll_options, poll_ballots, ...plan }) => ({
     ...plan,
+    poll_option_count: poll_options?.[0]?.count ?? 0,
+    poll_vote_count: poll_ballots?.[0]?.count ?? 0,
     interest_count: interests?.[0]?.count ?? 0,
+    maybe_count: maybe?.[0]?.count ?? 0,
     approved_count: approved?.[0]?.count ?? 0,
     pending_count: pending?.[0]?.count ?? 0,
   }));

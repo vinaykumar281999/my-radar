@@ -20,6 +20,7 @@ import { csvFilename, downloadCsv, toCsv } from "@/lib/csv";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import {
+  commitmentSummary,
   countLeads,
   riderFlagSummary,
   waitlistOrder,
@@ -147,7 +148,7 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
 
   function exportCsv() {
     const csv = toCsv(
-      ["Received", "Name", "Contact", "Note", "Plan", "Status", ...(isCarpool ? ["Can drive", "Big bag"] : [])],
+      ["Received", "Name", "Contact", "Note", "Plan", "Status", ...(hasSpots ? [] : ["In or maybe"]), ...(isCarpool ? ["Can drive", "Big bag"] : [])],
       visible.map((l) => [
         l.created_at,
         l.visitor_name,
@@ -155,6 +156,7 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
         l.message,
         plan?.title,
         l.status,
+        ...(hasSpots ? [] : [l.commitment]),
         ...(isCarpool ? [l.can_drive ? "yes" : "", l.large_bag ? "yes" : ""] : []),
       ]),
     );
@@ -168,7 +170,10 @@ export function LeadsDrawer({ plan, onOpenChange, onCountChange, onBlocked }: Le
           <DrawerTitle className="flex items-center gap-2 text-lg font-bold">
             <Users className="size-5 text-primary" /> {hasSpots ? "Spot requests" : "Interested friends"}
           </DrawerTitle>
-          <DrawerDescription className="text-left">{plan?.title}</DrawerDescription>
+          <DrawerDescription className="text-left">
+            {plan?.title}
+            {!hasSpots && leads && leads.length > 0 && <> · {commitmentSummary(counts)}</>}
+          </DrawerDescription>
           {hasSpots && plan?.capacity != null && leads && (
             <SpotsMeter
               capacity={plan.capacity}
@@ -309,6 +314,7 @@ function LeadRow({
           <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
             {timeAgo(lead.created_at)}
             {onStatus && <RequestStatusPill status={lead.status} />}
+            {!onStatus && <CommitmentPill commitment={lead.commitment} />}
             {lead.status === "pending" && lead.promoted_at && (
               <span className="inline-flex items-center gap-0.5 rounded-full bg-violet-100 px-1.5 py-px text-[10px] font-bold tracking-wide text-violet-800 uppercase dark:bg-violet-500/15 dark:text-violet-300">
                 <ArrowUp className="size-2.5" /> Promoted from waitlist
@@ -395,6 +401,21 @@ function SpotsMeter({
         <div className="h-full rounded-full bg-foreground transition-all" style={{ width: `${Math.min(100, (taken / capacity) * 100)}%` }} />
       </div>
     </div>
+  );
+}
+
+/** "In" / "Maybe" on plain plans (a missing value is treated as "in"). */
+function CommitmentPill({ commitment }: { commitment?: Interest["commitment"] }) {
+  const maybe = commitment === "maybe";
+  return (
+    <span
+      className={cn(
+        "rounded-full px-1.5 py-px text-[10px] font-bold tracking-wide uppercase",
+        maybe ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary",
+      )}
+    >
+      {maybe ? "Maybe" : "In"}
+    </span>
   );
 }
 

@@ -175,6 +175,21 @@ try {
   });
   if (audErr) throw new Error(`set_plan_audience: ${audErr.message}`);
 
+  // A date poll on the circle plan, added before the "after" snapshot so the
+  // byte comparisons below cover a plan with a poll too. (If the live database
+  // doesn't have the poll schema yet, the poll checks are skipped, loudly.)
+  const { data: pollOptions, error: pollErr } = await owner.client
+    .from("plan_date_options")
+    .insert([
+      { plan_id: sec.id, owner_id: owner.id, start_date: "2027-01-08", end_date: "2027-01-10" },
+      { plan_id: sec.id, owner_id: owner.id, start_date: "2027-01-15" },
+    ])
+    .select("id");
+  const pollSchema = !pollErr;
+  if (pollErr && !/plan_date_options|schema cache|does not exist/i.test(pollErr.message)) {
+    throw new Error(`poll options: ${pollErr.message}`);
+  }
+
   // ---- Signed-out output must be byte-identical (apart from ids) ----
   const after = {
     page: await get(`/${owner.username}`),
@@ -215,6 +230,39 @@ try {
   check("outsider sees nothing shared", Array.isArray(outsiderShared) && outsiderShared.length === 0);
   const { data: outsiderPlan } = await outsider.client.rpc("get_shared_plan", { p_plan_id: sec.id });
   check("outsider gets null for the circle plan id", outsiderPlan === null);
+
+  // ---- Date poll on the circle plan: counts only for members, votes only from members ----
+  if (!pollSchema) {
+    console.log("SKIP  date-poll checks: the live database doesn't have plan_date_options yet (run supabase/schema.sql)");
+  } else {
+    const pollFor = (client) => client.rpc("plan_poll", { p_plan_ids: [sec.id] });
+    const [anonPoll, outsiderPoll, memberPoll] = await Promise.all([pollFor(anon), pollFor(outsider.client), pollFor(member.client)]);
+    check("anon gets no poll for the circle plan", !anonPoll.error && anonPoll.data?.length === 0, anonPoll.error?.message);
+    check("outsider gets no poll for the circle plan", !outsiderPoll.error && outsiderPoll.data?.length === 0, outsiderPoll.error?.message);
+    check("member sees the circle plan's poll", memberPoll.data?.length === 2, memberPoll.error?.message ?? `${memberPoll.data?.length} rows`);
+    const keys = [...new Set((memberPoll.data ?? []).flatMap((r) => Object.keys(r)))].sort().join(",");
+    check("poll counts carry no names or contacts", keys === "end_date,option_id,plan_id,start_date,votes", keys);
+
+    const vote = (user_id, plan = sec.id) =>
+      admin.rpc("cast_poll_vote", { p_plan_id: plan, p_option_ids: [pollOptions[0].id], p_name: "Leak voter", p_contact: "@leakvoter", p_user_id: user_id });
+    const [voteSignedOut, voteOutsider, voteMissing] = await Promise.all([vote(null), vote(outsider.id), vote(null, randomUUID())]);
+    check("signed-out vote on a circle plan refused", !!voteSignedOut.error?.message.includes("plan_unavailable"), voteSignedOut.error?.message);
+    check("outsider vote on a circle plan refused", !!voteOutsider.error?.message.includes("plan_unavailable"), voteOutsider.error?.message);
+    check("…with the same error as a missing plan", !!voteMissing.error?.message.includes("plan_unavailable"), voteMissing.error?.message);
+    const voteMember = await vote(member.id);
+    check("member vote on a circle plan accepted", !voteMember.error, voteMember.error?.message);
+
+    const { data: afterVote } = await pollFor(member.client);
+    check("member sees the vote counted", afterVote?.find((r) => r.option_id === pollOptions[0].id)?.votes === 1);
+    const { data: ownerBallots } = await owner.client.from("plan_poll_ballots").select("voter_name").eq("plan_id", sec.id);
+    check("owner sees who voted", ownerBallots?.length === 1 && ownerBallots[0].voter_name === "Leak voter");
+    const { data: outsiderBallots } = await outsider.client.from("plan_poll_ballots").select("voter_name");
+    check("outsider sees no ballots", Array.isArray(outsiderBallots) && outsiderBallots.length === 0);
+    const anonBallots = await anon.from("plan_poll_ballots").select("voter_name");
+    check("anon can't read ballots", !!anonBallots.error || anonBallots.data?.length === 0, anonBallots.error?.message);
+    const anonCast = await anon.rpc("cast_poll_vote", { p_plan_id: sec.id, p_option_ids: [pollOptions[0].id], p_name: "x", p_contact: "@x", p_user_id: null });
+    check("anon can't call cast_poll_vote directly", anonCast.error?.code === "42501", anonCast.error?.message);
+  }
 
   // ---- Copy to my Radar ----
   for (const [label, source] of [["circle", sec.id], ["unlisted", unl.id]]) {

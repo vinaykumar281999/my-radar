@@ -13,10 +13,12 @@ import { formatDateRange, formatDeparture } from "@/lib/dates";
 import { canCopyPlan } from "@/lib/audience";
 import { useViewer, useViewerStatus } from "@/components/ViewerContext";
 import { CarpoolDetails } from "@/components/CarpoolDetails";
+import { DatePoll } from "@/components/DatePoll";
+import { DecideBy } from "@/components/DecideBy";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { PROMOTION_DISMISSED_EVENT, isUnseenPromotion } from "@/lib/promotion-notices";
-import type { InterestStatus, Plan, Spots } from "@/lib/types";
+import type { Commitment, InterestStatus, Plan, Spots } from "@/lib/types";
 
 const REQUEST_LABEL: Record<InterestStatus, string> = {
   pending: "Requested · waiting for an answer",
@@ -43,6 +45,8 @@ type PlanCardProps = {
         | "destination"
         | "departs_at"
         | "departs_tz"
+        | "poll_closed_at"
+        | "decide_by"
       >
     >;
   hostName: string;
@@ -58,6 +62,7 @@ type PlanCardProps = {
 
 export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots, className }: PlanCardProps) {
   const [open, setOpen] = useState(false);
+  const [commitment, setCommitment] = useState<Commitment>("in");
   // Set right after sending, so the card updates without a reload.
   const [sentStatus, setSentStatus] = useState<InterestStatus | null>(null);
   const viewer = useViewer();
@@ -110,12 +115,23 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
 
       {plan.dates_flexible && !isCarpool && <FlexibleDatesLabel className="mt-1.5 ml-2 first:ml-0" />}
 
+      {plan.status === "Booking Soon" && plan.decide_by && (
+        <p className="mt-2">
+          <DecideBy date={plan.decide_by} />
+        </p>
+      )}
+
       {plan.notes && <p className="mt-2 text-sm leading-relaxed text-foreground/80">{plan.notes}</p>}
 
       {hasSpots && left !== null && (
         <p className={cn("mt-2 text-sm font-semibold", left === 0 ? "text-muted-foreground" : "text-foreground")}>
           {left === 0 ? "Full" : `${left} of ${spots!.capacity} ${seatWord}s left`}
         </p>
+      )}
+
+      {/* Only "Just an Idea" plans can have an open poll; the database decides the rest. */}
+      {plan.status === "Just an Idea" && !plan.poll_closed_at && !demo && !isCarpool && (
+        <DatePoll planId={plan.id} ownerId={plan.user_id} hostName={hostName} />
       )}
 
       <ChainPill
@@ -144,20 +160,40 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
           >
             Sign in to request a seat
           </Button>
-        ) : (
+        ) : hasSpots ? (
           <Button
-            onClick={() => setOpen(true)}
-            variant={hasSpots && left === 0 ? "outline" : "default"}
+            onClick={() => {
+              setCommitment("in");
+              setOpen(true);
+            }}
+            variant={left === 0 ? "outline" : "default"}
             className="h-11 flex-1 rounded-xl text-base font-semibold"
           >
-            {hasSpots
-              ? left === 0
-                ? "Join the waitlist"
-                : isCarpool
-                  ? "Request a seat 🚗"
-                  : "Request a spot ✋"
-              : "I'm Interested 👋"}
+            {left === 0 ? "Join the waitlist" : isCarpool ? "Request a seat 🚗" : "Request a spot ✋"}
           </Button>
+        ) : (
+          // Plain plans: a clear yes, or a softer maybe. Same form either way.
+          <div className="flex flex-1 gap-2">
+            <Button
+              onClick={() => {
+                setCommitment("in");
+                setOpen(true);
+              }}
+              className="h-11 flex-[3] rounded-xl text-base font-semibold"
+            >
+              I&apos;m in 🙌
+            </Button>
+            <Button
+              onClick={() => {
+                setCommitment("maybe");
+                setOpen(true);
+              }}
+              variant="outline"
+              className="h-11 flex-[2] rounded-xl text-base font-semibold"
+            >
+              Maybe 🤔
+            </Button>
+          </div>
         )}
         {canCopy && viewer && hostUsername && (
           <CopyToRadarButton plan={plan} viewerId={viewer.id} hostUsername={hostUsername} />
@@ -188,6 +224,7 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
         demo={demo}
         spotRequest={hasSpots}
         seatWord={seatWord}
+        commitment={commitment}
         onSent={({ waitlisted }) => viewer && setSentStatus(hasSpots ? (waitlisted ? "waitlisted" : "pending") : "interested")}
       />
     </article>

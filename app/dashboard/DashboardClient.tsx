@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   Archive,
   ArchiveRestore,
+  CalendarCheck,
   CalendarDays,
   Check,
   Copy,
@@ -14,6 +15,7 @@ import {
   ImageDown,
   ChevronDown,
   ChevronRight,
+  Ellipsis,
   Lightbulb,
   Pencil,
   Plus,
@@ -26,7 +28,8 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/Avatar";
-import { CategoryLabel, ChainPill, STATUS_STYLES } from "@/components/plan-meta";
+import { CATEGORY_ICONS, ChainPill, STATUS_STYLES } from "@/components/plan-meta";
+import { Menu, MenuContent, MenuSeparator, menuItemClass } from "@/components/ui/menu";
 import { PitchesDrawer } from "@/components/PitchesDrawer";
 import { QuickAddPlan } from "@/components/QuickAddPlan";
 import { LeadsDrawer } from "@/components/LeadsDrawer";
@@ -36,6 +39,8 @@ import { PromotionNotices } from "@/components/PromotionNotices";
 import { ViewAsDrawer, type ViewAsMember } from "@/components/ViewAsDrawer";
 import { AccountMenu } from "@/components/AccountMenu";
 import { InterestOverviewDrawer } from "@/components/InterestOverviewDrawer";
+import { PollDrawer } from "@/components/PollDrawer";
+import { DecideBy } from "@/components/DecideBy";
 import { StoryExportModal } from "@/components/StoryExportModal";
 import { copyText } from "@/components/ShareButton";
 import { useOrigin } from "@/hooks/use-origin";
@@ -44,7 +49,7 @@ import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { formatDeparture } from "@/lib/dates";
 import { planWhen, sortByWhen } from "@/lib/plan-when";
-import { STATUSES, type BlockResult, type CircleOption, countLeads, type LeadCounts, type JoinNotice, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
+import { STATUSES, commitmentSummary, type BlockResult, type CircleOption, countLeads, type LeadCounts, type JoinNotice, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
 
 type DashboardClientProps = {
   profile: Profile;
@@ -80,6 +85,11 @@ export function DashboardClient({
   const [audiences, setAudiences] = useState(initialAudiences);
   const [viewAsOpen, setViewAsOpen] = useState(false);
   const [interestOpen, setInterestOpen] = useState(false);
+  const [pollPlanId, setPollPlanId] = useState<string | null>(null);
+  const pollPlan = plans.find((p) => p.id === pollPlanId) ?? null;
+  const onPollCounts = useCallback((planId: string, c: { options: number; votes: number }) => {
+    setPlans((ps) => ps.map((p) => (p.id === planId ? { ...p, poll_option_count: c.options, poll_vote_count: c.votes } : p)));
+  }, []);
   const [showArchived, setShowArchived] = useState(false);
   const circleNames = (planId: string) =>
     (audiences[planId] ?? []).map((id) => circles.find((c) => c.id === id)?.name).filter(Boolean) as string[];
@@ -156,10 +166,21 @@ export function DashboardClient({
       return existing
         ? prev.map((p) =>
             p.id === saved.id
-              ? { ...saved, interest_count: p.interest_count, approved_count: p.approved_count, pending_count: p.pending_count }
+              ? {
+                  ...saved,
+                  interest_count: p.interest_count,
+                  maybe_count: p.maybe_count,
+                  approved_count: p.approved_count,
+                  pending_count: p.pending_count,
+                  poll_option_count: p.poll_option_count,
+                  poll_vote_count: p.poll_vote_count,
+                }
               : p,
           )
-        : [{ ...saved, interest_count: 0, approved_count: 0, pending_count: 0 }, ...prev];
+        : [
+            { ...saved, interest_count: 0, maybe_count: 0, approved_count: 0, pending_count: 0, poll_option_count: 0, poll_vote_count: 0 },
+            ...prev,
+          ];
     });
   }
 
@@ -202,6 +223,7 @@ export function DashboardClient({
         return {
           ...p,
           interest_count: Math.max(0, p.interest_count - by.interest_count),
+          maybe_count: Math.max(0, p.maybe_count - by.maybe_count),
           approved_count: Math.max(0, p.approved_count - by.approved_count),
           pending_count: Math.max(0, p.pending_count - by.pending_count),
         };
@@ -210,7 +232,7 @@ export function DashboardClient({
   }
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-4 pt-4 pb-28">
+    <main className="mx-auto w-full max-w-2xl px-4 pt-4 pb-28 lg:max-w-5xl">
       {/* Header */}
       <header className="-mx-4 flex items-center justify-between gap-3 border-b px-4 pb-3">
         <Link href="/" className="inline-flex items-center gap-2 text-lg font-bold tracking-tight">
@@ -345,7 +367,7 @@ export function DashboardClient({
             </Button>
           </div>
         ) : (
-          <ul className="space-y-3">
+          <ul className="grid gap-3 lg:grid-cols-2">
             {active.map((plan) => (
               <ManagePlanRow
                 key={plan.id}
@@ -357,6 +379,7 @@ export function DashboardClient({
                 onLeads={() => openLeads(plan)}
                 onCopyLink={() => copyPlanLink(plan)}
                 onChain={() => copyChainLink(plan)}
+                onPoll={() => setPollPlanId(plan.id)}
                 localToday={localToday}
                 circleNames={circleNames(plan.id)}
               />
@@ -428,6 +451,13 @@ export function DashboardClient({
         onCountChange={onCountChange}
         onBlocked={onBlocked}
       />
+      <PollDrawer
+        plan={pollPlan}
+        onOpenChange={(o) => !o && setPollPlanId(null)}
+        onCounts={onPollCounts}
+        onPicked={(updated) => setPlans((ps) => ps.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)))}
+        onBookingSoon={(planId) => patchPlan(planId, { status: "Booking Soon" }, "Moved to Booking Soon")}
+      />
       <InterestOverviewDrawer
         open={interestOpen}
         onOpenChange={setInterestOpen}
@@ -462,6 +492,7 @@ type ManagePlanRowProps = {
   onLeads: () => void;
   onCopyLink: () => void;
   onChain: () => void;
+  onPoll: () => void;
   circleNames: string[];
   localToday: LocalToday;
 };
@@ -475,59 +506,79 @@ function ManagePlanRow({
   onLeads,
   onCopyLink,
   onChain,
+  onPoll,
   circleNames,
   localToday,
 }: ManagePlanRowProps) {
-  const [confirmDelete, requestDelete] = useTapToConfirm(onDelete);
   const isCarpool = plan.category === "Carpool";
   const when = planWhen(plan, localToday.today, localToday.timeZone);
   const chained = !!(plan.suggested_by_handle || plan.chained_from_plan_id);
   // Only public plans can be copied (and so chained) by friends; never rides.
   const canChain = !chained && plan.visibility === "public" && !isCarpool;
 
+  const CategoryIcon = CATEGORY_ICONS[plan.category];
+  // Polls are for plans that are still an idea; once picked, the dates speak for themselves.
+  const canPoll = plan.status === "Just an Idea" && !isCarpool && !plan.poll_closed_at;
+
   return (
-    <li className="tap-card p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <CategoryLabel category={plan.category} />
-          <p className="mt-1 leading-snug font-bold">{plan.title}</p>
-          <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <CalendarDays className="size-3" />
-            {isCarpool && plan.departs_at && plan.departs_tz
-              ? `${plan.origin} → ${plan.destination} · ${formatDeparture(plan.departs_at, plan.departs_tz)}`
-              : `${when.label}${when.rawDates ? ` · ${when.rawDates}` : ""}`}
-            {when.past && " · past"}
-            {plan.dates_flexible && !isCarpool && " · dates flexible"}
-          </p>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {plan.visibility === "circles" && (
-              <span className="inline-flex max-w-full items-center gap-1 truncate rounded-full bg-foreground px-2 py-0.5 text-[11px] font-semibold text-background">
-                <UsersRound className="size-3 shrink-0" />
-                {circleNames.length ? circleNames.join(", ") : "No circles — only you"}
-              </span>
-            )}
-            {plan.visibility === "unlisted" && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-foreground px-2 py-0.5 text-[11px] font-semibold text-background">
-                <EyeOff className="size-3" /> Unlisted
-              </span>
-            )}
-            <ChainPill plan={plan} />
-            {canChain && (
-              <button
-                type="button"
-                onClick={onChain}
-                className="inline-flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
-              >
-                <Plus className="size-3" /> Chain with a friend
-              </button>
-            )}
-          </div>
-        </div>
+    <li className="tap-card flex flex-col p-3">
+      <div className="flex items-start gap-2">
+        <p className="flex min-w-0 flex-1 items-start gap-1.5 leading-snug font-bold">
+          <CategoryIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-label={plan.category} />
+          <span className="line-clamp-2">{plan.title}</span>
+        </p>
+        <StatusMenu status={plan.status} onChange={onStatus} />
+      </div>
+
+      <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
+        <span className="inline-flex items-center gap-1">
+          <CalendarDays className="size-3" />
+          {isCarpool && plan.departs_at && plan.departs_tz
+            ? `${plan.origin} → ${plan.destination} · ${formatDeparture(plan.departs_at, plan.departs_tz)}`
+            : `${when.label}${when.rawDates ? ` · ${when.rawDates}` : ""}`}
+          {when.past && " · past"}
+          {plan.dates_flexible && !isCarpool && " · flexible"}
+        </span>
+        {plan.visibility === "circles" && (
+          <span className="inline-flex max-w-full items-center gap-1 truncate rounded-full bg-foreground px-1.5 py-px text-[10px] font-semibold text-background">
+            <UsersRound className="size-2.5 shrink-0" />
+            {circleNames.length ? circleNames.join(", ") : "No circles — only you"}
+          </span>
+        )}
+        {plan.visibility === "unlisted" && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-foreground px-1.5 py-px text-[10px] font-semibold text-background">
+            <EyeOff className="size-2.5" /> Unlisted
+          </span>
+        )}
+        {plan.status === "Booking Soon" && plan.decide_by && <DecideBy date={plan.decide_by} className="px-1.5 py-px text-[10px]" />}
+        {canPoll && plan.poll_option_count > 0 && (
+          <button
+            type="button"
+            onClick={onPoll}
+            className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-px text-[10px] font-semibold text-primary hover:bg-primary/20"
+          >
+            <CalendarCheck className="size-2.5" />
+            {plan.poll_option_count < 2 ? "Poll · add another date" : `Poll · ${plan.poll_vote_count} voted`}
+          </button>
+        )}
+        <ChainPill plan={plan} className="px-1.5 py-px text-[10px]" />
+        {canChain && (
+          <button
+            type="button"
+            onClick={onChain}
+            className="inline-flex items-center gap-0.5 rounded-full border border-dashed px-1.5 py-px text-[10px] font-medium transition-colors hover:border-primary/50 hover:text-primary"
+          >
+            <Plus className="size-2.5" /> Chain with a friend
+          </button>
+        )}
+      </div>
+
+      <div className="mt-auto flex items-center gap-1 pt-2">
         <button
           type="button"
           onClick={onLeads}
           className={cn(
-            "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold transition-colors",
+            "flex h-7 shrink-0 items-center gap-1 rounded-full px-2.5 text-xs font-semibold transition-colors",
             plan.interest_count > 0
               ? "bg-primary text-primary-foreground hover:bg-primary/85"
               : "bg-muted text-muted-foreground hover:bg-muted/70",
@@ -535,72 +586,105 @@ function ManagePlanRow({
           aria-label={
             plan.capacity != null
               ? `${plan.approved_count} of ${plan.capacity} spots taken, ${plan.pending_count} waiting — see who`
-              : `${plan.interest_count} interested — see who`
+              : `${commitmentSummary(plan)} — see who's interested`
           }
           title="See who's interested"
         >
-          <Users className="size-4" />
+          <Users className="size-3.5" />
           {plan.capacity != null ? (
             <span className="tabular-nums">
               {plan.approved_count}/{plan.capacity}
               {plan.pending_count > 0 && (
-                <span className="ml-1.5 rounded-full bg-amber-400 px-1.5 text-[11px] text-amber-950">
-                  {plan.pending_count} new
-                </span>
+                <span className="ml-1 rounded-full bg-amber-400 px-1.5 text-[10px] text-amber-950">{plan.pending_count} new</span>
               )}
             </span>
           ) : (
-            <span className="tabular-nums">{plan.interest_count}</span>
+            <span className="tabular-nums">{commitmentSummary(plan)}</span>
           )}
         </button>
-      </div>
-
-      {/* One-tap status toggle */}
-      <div role="radiogroup" aria-label="Status" className="mt-3 grid grid-cols-3 gap-1 rounded-xl bg-muted p-1">
-        {STATUSES.map((status) => {
-          const selected = plan.status === status;
-          return (
-            <button
-              key={status}
-              type="button"
-              role="radio"
-              aria-checked={selected}
-              onClick={() => !selected && onStatus(status)}
-              className={cn(
-                "flex h-8 items-center justify-center gap-1.5 rounded-lg text-xs font-semibold transition-all",
-                selected ? cn("ring-1 ring-inset", STATUS_STYLES[status].pill) : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <span
-                className={cn("size-1.5 rounded-full", STATUS_STYLES[status].dot, !selected && "animate-none opacity-40")}
-                aria-hidden
-              />
-              {status}
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-center gap-1 border-t pt-3">
-        <Button variant="ghost" size="sm" onClick={onEdit}>
-          <Pencil /> Edit
-        </Button>
-        <Button variant="ghost" size="sm" onClick={onCopyLink} aria-label="Share: copy this plan's link">
-          <Share2 /> Share
-        </Button>
-        <Button variant="ghost" size="sm" onClick={onArchive}>
-          <Archive /> Archive
-        </Button>
-        <Button
-          variant={confirmDelete ? "destructive" : "ghost"}
-          size="sm"
-          className="ml-auto"
-          onClick={requestDelete}
-        >
-          <Trash2 /> {confirmDelete ? "Tap to confirm" : "Delete"}
-        </Button>
+        <div className="ml-auto flex items-center">
+          <Button variant="ghost" size="sm" onClick={onEdit} className="h-7 px-2 text-xs">
+            <Pencil /> Edit
+          </Button>
+          <Button variant="ghost" size="sm" onClick={onCopyLink} className="h-7 px-2 text-xs" aria-label="Share: copy this plan's link">
+            <Share2 /> Share
+          </Button>
+          <PlanMoreMenu title={plan.title} onArchive={onArchive} onDelete={onDelete} onPoll={canPoll ? onPoll : undefined} />
+        </div>
       </div>
     </li>
+  );
+}
+
+/** Small status pill; tapping it opens the three statuses. */
+function StatusMenu({ status, onChange }: { status: Status; onChange: (s: Status) => void }) {
+  return (
+    <Menu.Root>
+      <Menu.Trigger
+        className={cn(
+          "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap ring-1 ring-inset outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          STATUS_STYLES[status].pill,
+        )}
+        aria-label={`Status: ${status}. Change status`}
+      >
+        <span className={cn("size-1.5 rounded-full", STATUS_STYLES[status].dot)} aria-hidden />
+        {status}
+        <ChevronDown className="size-3 opacity-60" aria-hidden />
+      </Menu.Trigger>
+      <MenuContent>
+        {STATUSES.map((s) => (
+          <Menu.Item key={s} className={menuItemClass} onClick={() => s !== status && onChange(s)}>
+            <span className={cn("size-2 rounded-full", STATUS_STYLES[s].dot, "animate-none")} aria-hidden />
+            <span className="flex-1">{s}</span>
+            {s === status && <Check aria-label="current" />}
+          </Menu.Item>
+        ))}
+      </MenuContent>
+    </Menu.Root>
+  );
+}
+
+/** Less-used actions. Delete needs a second tap, so its item keeps the menu open. */
+function PlanMoreMenu({
+  title,
+  onArchive,
+  onDelete,
+  onPoll,
+}: {
+  title: string;
+  onArchive: () => void;
+  onDelete: () => void;
+  /** Offered on "Just an Idea" plans: open the date poll. */
+  onPoll?: () => void;
+}) {
+  const [confirmDelete, requestDelete] = useTapToConfirm(onDelete);
+  return (
+    <Menu.Root>
+      <Menu.Trigger
+        className="grid size-7 place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-muted"
+        aria-label={`More actions for ${title}`}
+      >
+        <Ellipsis className="size-4" />
+      </Menu.Trigger>
+      <MenuContent>
+        {onPoll && (
+          <Menu.Item className={menuItemClass} onClick={onPoll}>
+            <CalendarCheck /> Date poll
+          </Menu.Item>
+        )}
+        <Menu.Item className={menuItemClass} onClick={onArchive}>
+          <Archive /> Archive
+        </Menu.Item>
+        <MenuSeparator />
+        <Menu.Item
+          closeOnClick={false}
+          onClick={requestDelete}
+          className={cn(menuItemClass, "text-destructive [&_svg]:text-destructive", confirmDelete && "bg-destructive/10 font-semibold")}
+        >
+          <Trash2 /> {confirmDelete ? "Tap again to delete" : "Delete"}
+        </Menu.Item>
+      </MenuContent>
+    </Menu.Root>
   );
 }
 

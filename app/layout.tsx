@@ -21,7 +21,7 @@ export const metadata: Metadata = {
     template: "%s · Radar",
   },
   description:
-    "Share your upcoming trips, concerts, and weekend plans in one link. Friends tap “I'm Interested” before you book.",
+    "Share your upcoming trips, concerts, and weekend plans in one link. Friends tap “I'm in” before you book.",
 };
 
 export const viewport: Viewport = {

@@ -69,22 +69,33 @@ export type Plan = {
   /** "@handle" or a first name — never a phone number (see publicAttribution). */
   suggested_by_handle: string | null;
   chained_from_plan_id: string | null;
+  /** Date poll: set when the owner picked an option (the poll is then closed). */
+  poll_closed_at: string | null;
+  poll_picked_option_id: string | null;
+  /** Booking Soon plans: an optional "decide by" date ("YYYY-MM-DD"), shown publicly. */
+  decide_by: string | null;
   created_at: string;
 };
 
 export type PlanWithCount = Plan & {
   interest_count: number;
+  /** Plain plans: how many of interest_count said "Maybe". */
+  maybe_count: number;
+  /** Date poll: options offered and people who voted (owner only). */
+  poll_option_count: number;
+  poll_vote_count: number;
   /** Plans with spots: approved / waiting for a decision. */
   approved_count: number;
   pending_count: number;
 };
 
 /** Totals the dashboard shows for a plan's interests / requests. */
-export type LeadCounts = { interest_count: number; approved_count: number; pending_count: number };
+export type LeadCounts = { interest_count: number; maybe_count: number; approved_count: number; pending_count: number };
 
-export function countLeads(leads: Pick<Interest, "status">[]): LeadCounts {
+export function countLeads(leads: (Pick<Interest, "status"> & { commitment?: Commitment })[]): LeadCounts {
   return {
     interest_count: leads.length,
+    maybe_count: leads.filter((l) => l.commitment === "maybe").length,
     approved_count: leads.filter((l) => l.status === "approved").length,
     pending_count: leads.filter((l) => l.status === "pending").length,
   };
@@ -94,6 +105,25 @@ export function countLeads(leads: Pick<Interest, "status">[]): LeadCounts {
 export type Spots = { capacity: number; taken: number };
 
 /** "waitlisted": the plan was full; promote_waitlist moves people to "pending" in order. */
+export const COMMITMENTS = ["in", "maybe"] as const;
+export type Commitment = (typeof COMMITMENTS)[number];
+
+/** "3 in · 2 maybe", "3 in", "2 maybe" or "0" for a plain plan's interest. */
+export function commitmentSummary({ interest_count, maybe_count }: Pick<LeadCounts, "interest_count" | "maybe_count">) {
+  const maybe = Math.min(maybe_count, interest_count);
+  const yes = interest_count - maybe;
+  if (interest_count === 0) return "0";
+  if (maybe === 0) return `${yes} in`;
+  if (yes === 0) return `${maybe} maybe`;
+  return `${yes} in · ${maybe} maybe`;
+}
+
+/** What a reaction says on the owner's side: "in"/"maybe" for plain interest, else its status. */
+export function reactionLabel(status: InterestStatus, commitment?: Commitment) {
+  if (status === "interested") return commitment === "maybe" ? "maybe" : "in";
+  return INTEREST_STATUS_LABEL[status];
+}
+
 export const INTEREST_STATUSES = ["interested", "pending", "approved", "declined", "waitlisted"] as const;
 export type InterestStatus = (typeof INTEREST_STATUSES)[number];
 
@@ -114,6 +144,8 @@ export type Interest = {
   message: string | null;
   status: InterestStatus;
   user_id: string | null;
+  /** "I'm in" or "Maybe" (spot and carpool requests are always "in"). */
+  commitment: Commitment;
   /** Carpool requests only (always false elsewhere). */
   can_drive: boolean;
   large_bag: boolean;
@@ -223,7 +255,7 @@ export type BlockedContact = {
 /** What block_contact() cleared: dismissed pitches and deleted interests. */
 export type BlockResult = {
   pitch_ids: string[];
-  interests: { id: string; plan_id: string; status: InterestStatus }[];
+  interests: { id: string; plan_id: string; status: InterestStatus; commitment?: Commitment }[];
 };
 
 export type PlanInput = Pick<
@@ -235,6 +267,7 @@ export type PlanInput = Pick<
   | "start_date"
   | "end_date"
   | "dates_flexible"
+  | "decide_by"
   | "status"
   | "notes"
   | "visibility"

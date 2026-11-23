@@ -20,7 +20,7 @@ export async function generateMetadata({ params }: PageProps<"/[username]">): Pr
   const title = `${profile.display_name} (@${profile.username})`;
   const description =
     plans.length > 0
-      ? `Upcoming: ${plans.slice(0, 3).map((p) => p.title).join(" · ")}. Tap “I'm Interested” to get in.`
+      ? `Upcoming: ${plans.slice(0, 3).map((p) => p.title).join(" · ")}. Tap “I'm in” to join.`
       : profile.bio ?? `See what ${profile.display_name} is planning next.`;
 
   return {

@@ -6,16 +6,24 @@ import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } f
 import { Skeleton } from "@/components/ui/skeleton";
 import { ContactChip } from "@/components/ContactChip";
 import { createClient } from "@/lib/supabase/client";
-import { INTEREST_STATUS_LABEL, type Interest, type InterestStatus, type Plan } from "@/lib/types";
+import {
+  commitmentSummary,
+  countLeads,
+  reactionLabel,
+  type Commitment,
+  type Interest,
+  type InterestStatus,
+  type Plan,
+} from "@/lib/types";
 
-type Row = Pick<Interest, "id" | "plan_id" | "visitor_name" | "contact_handle" | "user_id" | "status" | "created_at">;
+type Row = Pick<Interest, "id" | "plan_id" | "visitor_name" | "contact_handle" | "user_id" | "status" | "commitment" | "created_at">;
 
 export type InterestPerson = {
   key: string;
   name: string;
   contact: string;
   /** Newest reaction first. */
-  reactions: { interestId: string; planId: string; status: InterestStatus; created_at: string }[];
+  reactions: { interestId: string; planId: string; status: InterestStatus; commitment: Commitment; created_at: string }[];
 };
 
 /**
@@ -27,7 +35,7 @@ export function groupInterestByPerson(rows: Row[]): InterestPerson[] {
   for (const r of [...rows].sort((a, b) => b.created_at.localeCompare(a.created_at))) {
     const key = r.user_id ? `u:${r.user_id}` : `c:${r.contact_handle.trim().toLowerCase()}`;
     const person = people.get(key) ?? { key, name: r.visitor_name, contact: r.contact_handle, reactions: [] };
-    person.reactions.push({ interestId: r.id, planId: r.plan_id, status: r.status, created_at: r.created_at });
+    person.reactions.push({ interestId: r.id, planId: r.plan_id, status: r.status, commitment: r.commitment, created_at: r.created_at });
     people.set(key, person);
   }
   return [...people.values()];
@@ -58,7 +66,7 @@ export function InterestOverviewDrawer({
     let cancelled = false;
     createClient()
       .from("interests")
-      .select("id, plan_id, visitor_name, contact_handle, user_id, status, created_at")
+      .select("id, plan_id, visitor_name, contact_handle, user_id, status, commitment, created_at")
       .in("plan_id", planIds.split(","))
       .returns<Row[]>()
       .then(({ data, error }) => {
@@ -75,6 +83,8 @@ export function InterestOverviewDrawer({
   const rows = planIds ? (current?.rows ?? null) : [];
   const people = rows ? groupInterestByPerson(rows) : null;
   const total = rows?.length ?? 0;
+  // In / maybe only means something for plain interest (not spot requests).
+  const plainCounts = countLeads((rows ?? []).filter((r) => r.status === "interested"));
   const title = (id: string) => plans.find((p) => p.id === id)?.title ?? "A plan";
 
   return (
@@ -88,7 +98,9 @@ export function InterestOverviewDrawer({
             {people
               ? people.length === 0
                 ? "Across everything on your radar"
-                : `${people.length} ${people.length === 1 ? "person" : "people"} · ${total} ${total === 1 ? "reaction" : "reactions"} across your plans`
+                : `${people.length} ${people.length === 1 ? "person" : "people"} · ${total} ${total === 1 ? "reaction" : "reactions"} across your plans${
+                    plainCounts.interest_count ? ` · ${commitmentSummary(plainCounts)}` : ""
+                  }`
               : "Loading…"}
           </DrawerDescription>
         </DrawerHeader>
@@ -122,7 +134,7 @@ export function InterestOverviewDrawer({
                           className="inline-flex max-w-full items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
                         >
                           <span className="truncate">{title(r.planId)}</span>
-                          <span className="font-medium text-primary/70">· {INTEREST_STATUS_LABEL[r.status]}</span>
+                          <span className="font-medium text-primary/70">· {reactionLabel(r.status, r.commitment)}</span>
                           <ChevronRight className="size-3 shrink-0" />
                         </button>
                       </li>

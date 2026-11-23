@@ -19,6 +19,10 @@ export function submitErrorMessage(error: SubmitError, hostFirstName: string) {
       return "This isn't available anymore.";
     case "invalid":
       return "Please fill in the required fields.";
+    case "poll_closed":
+      return `${hostFirstName} has already picked the dates.`;
+    case "invalid_options":
+      return "Those dates changed. Refresh and pick again.";
     default:
       return "Couldn't send that — please try again.";
   }

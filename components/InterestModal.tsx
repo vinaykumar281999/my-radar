@@ -18,6 +18,7 @@ import { CONTACT_HINT, Honeypot } from "@/components/Honeypot";
 import { useTurnstile } from "@/hooks/use-turnstile";
 import { submitInterest } from "@/lib/actions/submit";
 import { submitErrorMessage } from "@/lib/submit-messages";
+import type { Commitment } from "@/lib/types";
 
 type InterestModalProps = {
   open: boolean;
@@ -31,6 +32,8 @@ type InterestModalProps = {
   spotRequest?: boolean;
   /** "spot" or "seat" (carpools). */
   seatWord?: string;
+  /** Plain plans: "I'm in" or "Maybe" (ignored for spot requests). */
+  commitment?: Commitment;
   /** waitlisted: the plan was full and the request joined the waitlist. */
   onSent?: (result: { waitlisted: boolean }) => void;
 };
@@ -44,8 +47,10 @@ export function InterestModal({
   demo = false,
   spotRequest = false,
   seatWord = "spot",
+  commitment = "in",
   onSent,
 }: InterestModalProps) {
+  const isMaybe = !spotRequest && commitment === "maybe";
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
   const [message, setMessage] = useState("");
@@ -90,6 +95,7 @@ export function InterestModal({
           planId,
           name,
           contact,
+          commitment,
           message,
           ...(isSeat ? { canDrive, largeBag } : {}),
           website: trap,
@@ -125,7 +131,9 @@ export function InterestModal({
                 ? "You're on the waitlist"
                 : spotRequest
                   ? `Requested! ${firstName} will confirm your ${seatWord}.`
-                  : `Sent! ${firstName} knows you're down.`}
+                  : isMaybe
+                    ? `Sent! ${firstName} knows you're a maybe.`
+                    : `Sent! ${firstName} knows you're in.`}
             </DrawerTitle>
             <DrawerDescription>
               {waitlisted ? (
@@ -149,10 +157,11 @@ export function InterestModal({
             <Honeypot value={trap} onChange={setTrap} />
             <DrawerHeader className="text-left">
               <DrawerTitle className="text-lg font-bold">
-                {spotRequest ? `Request a ${seatWord} ${seatWord === "seat" ? "🚗" : "✋"}` : "I'm interested 👋"}
+                {spotRequest ? `Request a ${seatWord} ${seatWord === "seat" ? "🚗" : "✋"}` : isMaybe ? "Maybe 🤔" : "I'm in 🙌"}
               </DrawerTitle>
               <DrawerDescription className="text-left">
-                {spotRequest ? "Ask" : "Let"} {firstName} {spotRequest ? `for a ${seatWord} on` : "know you want in on"}{" "}
+                {spotRequest ? "Ask" : "Let"} {firstName}{" "}
+                {spotRequest ? `for a ${seatWord} on` : isMaybe ? "know you might be up for" : "know you want in on"}{" "}
                 <span className="font-medium text-foreground">{planTitle}</span>.
                 {seatWord === "seat" ? " The pickup spot is shared once you're approved." : " No account needed."}
               </DrawerDescription>

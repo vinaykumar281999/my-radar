@@ -224,6 +224,11 @@ create index if not exists interests_waitlist_idx on public.interests (plan_id, 
 -- interests, so the same rules apply: a requester reads only their own row,
 -- the owner reads everyone's. guard_interest clears them on other plans.
 alter table public.interests add column if not exists can_drive boolean not null default false;
+-- "I'm in" or "Maybe" on plain plans. Spot and carpool requests are always
+-- 'in' (guard_interest). Like everything on interests: owner and requester only.
+alter table public.interests add column if not exists commitment text not null default 'in';
+alter table public.interests drop constraint if exists interests_commitment_check;
+alter table public.interests add constraint interests_commitment_check check (commitment in ('in', 'maybe'));
 alter table public.interests add column if not exists large_bag boolean not null default false;
 
 -- Helpers below are SECURITY DEFINER so RLS policies can use them without
@@ -738,9 +743,9 @@ begin
      where p.id = i.plan_id
        and p.user_id = auth.uid()
        and public.normalize_contact(i.contact_handle) = v_key
-    returning i.id, i.plan_id, i.status
+    returning i.id, i.plan_id, i.status, i.commitment
   )
-  select coalesce(jsonb_agg(jsonb_build_object('id', id, 'plan_id', plan_id, 'status', status)), '[]'::jsonb)
+  select coalesce(jsonb_agg(jsonb_build_object('id', id, 'plan_id', plan_id, 'status', status, 'commitment', commitment)), '[]'::jsonb)
     into v_interests from removed;
 
   return jsonb_build_object('pitch_ids', v_pitches, 'interests', v_interests);
@@ -785,6 +790,11 @@ begin
   -- to that account, so it has to be a real, identifiable person.
   if v_category = 'Carpool' and new.user_id is null then
     raise exception 'sign_in_required' using errcode = 'P0001';
+  end if;
+
+  -- "Maybe" only exists for plain interest: a spot or seat request is a yes.
+  if v_capacity is not null or v_category = 'Carpool' or new.commitment is null then
+    new.commitment := 'in';
   end if;
 
   -- Rider flags only mean something on a carpool; anywhere else they're ignored.
@@ -1768,6 +1778,259 @@ create policy "private_details_owner" on public.plan_private_details
   for all to authenticated using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 create policy "private_details_approved" on public.plan_private_details
   for select to authenticated using (public.viewer_is_approved_rider(plan_id));
+
+-- =============================================================================
+-- Date polls. The owner of a "Just an Idea" plan offers 2–4 date options;
+-- anyone who can see the plan votes for the ones that work. Names live only on
+-- ballots, which the owner and the voter themselves can read. Everyone else
+-- gets counts through plan_poll(), under the plan's own visibility rules.
+-- =============================================================================
+alter table public.plans add column if not exists poll_closed_at timestamptz;
+-- "Decide by" on Booking Soon plans: a public date, like the plan's own dates.
+alter table public.plans add column if not exists decide_by date;
+-- The option the owner picked (no foreign key: options can't be removed once picked).
+alter table public.plans add column if not exists poll_picked_option_id uuid;
+
+create table if not exists public.plan_date_options (
+  id          uuid primary key default gen_random_uuid(),
+  plan_id     uuid not null,
+  owner_id    uuid not null,
+  start_date  date not null,
+  end_date    date,
+  created_at  timestamptz not null default now(),
+  constraint plan_date_options_range check (end_date is null or end_date >= start_date),
+  constraint plan_date_options_plan_fkey foreign key (plan_id, owner_id) references public.plans (id, user_id) on delete cascade
+);
+create index if not exists plan_date_options_plan_idx on public.plan_date_options (plan_id, start_date);
+
+create table if not exists public.plan_poll_ballots (
+  id             uuid primary key default gen_random_uuid(),
+  plan_id        uuid not null references public.plans (id) on delete cascade,
+  -- Set for signed-in voters (one ballot each, replaced when they vote again).
+  user_id        uuid references public.profiles (id) on delete cascade,
+  voter_name     text not null check (char_length(voter_name) between 1 and 60),
+  voter_contact  text not null check (char_length(voter_contact) between 1 and 60),
+  created_at     timestamptz not null default now()
+);
+create unique index if not exists plan_poll_ballots_user_key on public.plan_poll_ballots (plan_id, user_id) where user_id is not null;
+
+create table if not exists public.plan_poll_choices (
+  ballot_id  uuid not null references public.plan_poll_ballots (id) on delete cascade,
+  option_id  uuid not null references public.plan_date_options (id) on delete cascade,
+  primary key (ballot_id, option_id)
+);
+create index if not exists plan_poll_choices_option_idx on public.plan_poll_choices (option_id);
+
+alter table public.plan_date_options enable row level security;
+alter table public.plan_poll_ballots enable row level security;
+alter table public.plan_poll_choices enable row level security;
+revoke all on public.plan_date_options, public.plan_poll_ballots, public.plan_poll_choices from public, anon, authenticated;
+-- Options: the owner manages them. Others see them only through plan_poll().
+grant select, insert, delete on public.plan_date_options to authenticated;
+-- Ballots and choices: written only by cast_poll_vote(); the owner may remove a ballot.
+grant select, delete on public.plan_poll_ballots to authenticated;
+grant select on public.plan_poll_choices to authenticated;
+
+drop policy if exists "poll_options_owner" on public.plan_date_options;
+create policy "poll_options_owner" on public.plan_date_options
+  for all to authenticated using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+drop policy if exists "poll_ballots_owner" on public.plan_poll_ballots;
+create policy "poll_ballots_owner" on public.plan_poll_ballots
+  for select to authenticated
+  using (exists (select 1 from public.plans p where p.id = plan_id and p.user_id = auth.uid()));
+drop policy if exists "poll_ballots_owner_delete" on public.plan_poll_ballots;
+create policy "poll_ballots_owner_delete" on public.plan_poll_ballots
+  for delete to authenticated
+  using (exists (select 1 from public.plans p where p.id = plan_id and p.user_id = auth.uid()));
+drop policy if exists "poll_ballots_own" on public.plan_poll_ballots;
+create policy "poll_ballots_own" on public.plan_poll_ballots
+  for select to authenticated using (user_id = auth.uid());
+
+drop policy if exists "poll_choices_visible" on public.plan_poll_choices;
+create policy "poll_choices_visible" on public.plan_poll_choices
+  for select to authenticated
+  using (
+    exists (
+      select 1 from public.plan_poll_ballots b
+        join public.plans p on p.id = b.plan_id
+       where b.id = ballot_id and (p.user_id = auth.uid() or b.user_id = auth.uid())
+    )
+  );
+
+-- Options can be added or removed only while the poll is open, only on a
+-- "Just an Idea" plan, and at most 4. Changing them never touches votes on
+-- other options.
+create or replace function public.guard_date_option()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_plan_id uuid := case when tg_op = 'DELETE' then old.plan_id else new.plan_id end;
+  v_status  text;
+  v_closed  timestamptz;
+  v_category text;
+begin
+  -- Same lock as votes and picking, so the option count can't race.
+  select p.status, p.poll_closed_at, p.category into v_status, v_closed, v_category
+    from public.plans p where p.id = v_plan_id for update;
+  if not found then
+    -- The plan is being deleted (cascade): nothing to guard.
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+  if v_closed is not null then
+    raise exception 'poll_closed' using errcode = 'P0001';
+  end if;
+  if tg_op = 'INSERT' then
+    if v_status <> 'Just an Idea' or v_category = 'Carpool' then
+      raise exception 'poll_needs_idea' using errcode = 'P0001';
+    end if;
+    if (select count(*) from public.plan_date_options o where o.plan_id = v_plan_id) >= 4 then
+      raise exception 'poll_full' using errcode = 'P0001';
+    end if;
+    return new;
+  end if;
+  return old;
+end;
+$$;
+
+revoke all on function public.guard_date_option() from public, anon, authenticated;
+
+drop trigger if exists plan_date_options_guard on public.plan_date_options;
+create trigger plan_date_options_guard
+  before insert or delete on public.plan_date_options
+  for each row execute function public.guard_date_option();
+
+-- Counts per option for open polls (2+ options) on plans the caller can see.
+-- No names, no ballots: the same answer anyone who can open the plan gets.
+create or replace function public.plan_poll(p_plan_ids uuid[])
+returns table (plan_id uuid, option_id uuid, start_date date, end_date date, votes int)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select o.plan_id, o.id, o.start_date, o.end_date,
+         (select count(*)::int from public.plan_poll_choices c where c.option_id = o.id)
+    from public.plan_date_options o
+    join public.plans p on p.id = o.plan_id
+   where o.plan_id = any (p_plan_ids)
+     and p.poll_closed_at is null
+     and not p.is_archived
+     and (select count(*) from public.plan_date_options x where x.plan_id = o.plan_id) >= 2
+     and public.can_user_see_plan(o.plan_id, auth.uid())
+   order by o.plan_id, o.start_date, o.end_date nulls first, o.id;
+$$;
+
+revoke all on function public.plan_poll(uuid[]) from public;
+grant execute on function public.plan_poll(uuid[]) to anon, authenticated;
+
+-- A vote, cast by the app's server action after Turnstile and the per-IP rate
+-- limit (service_role only). p_user_id comes from the voter's session.
+-- Anyone who can't see the plan gets plan_unavailable, exactly like a missing
+-- plan. A blocked contact gets sender_blocked, which the app reports as success.
+create or replace function public.cast_poll_vote(
+  p_plan_id uuid,
+  p_option_ids uuid[],
+  p_name text,
+  p_contact text,
+  p_user_id uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_owner   uuid;
+  v_closed  timestamptz;
+  v_ballot  uuid;
+  v_options int;
+begin
+  select p.user_id, p.poll_closed_at into v_owner, v_closed
+    from public.plans p
+   where p.id = p_plan_id and not p.is_archived
+     for update;
+  if not found or not public.can_user_see_plan(p_plan_id, p_user_id) then
+    raise exception 'plan_unavailable' using errcode = 'P0001';
+  end if;
+
+  select count(*) into v_options from public.plan_date_options o where o.plan_id = p_plan_id;
+  if v_closed is not null or v_options < 2 then
+    raise exception 'poll_closed' using errcode = 'P0001';
+  end if;
+
+  if coalesce(cardinality(p_option_ids), 0) = 0
+     or exists (
+       select 1 from unnest(p_option_ids) x(id)
+        where not exists (select 1 from public.plan_date_options o where o.id = x.id and o.plan_id = p_plan_id)
+     ) then
+    raise exception 'invalid_options' using errcode = 'P0001';
+  end if;
+
+  if exists (
+    select 1 from public.blocked_contacts b
+     where b.owner_id = v_owner and b.contact_key = public.normalize_contact(p_contact)
+  ) then
+    raise exception 'sender_blocked' using errcode = 'P0001';
+  end if;
+
+  if p_user_id is not null then
+    -- One ballot per signed-in voter: voting again replaces their choices.
+    insert into public.plan_poll_ballots (plan_id, user_id, voter_name, voter_contact)
+    values (p_plan_id, p_user_id, btrim(p_name), btrim(p_contact))
+    on conflict (plan_id, user_id) where user_id is not null
+    do update set voter_name = excluded.voter_name, voter_contact = excluded.voter_contact, created_at = now()
+    returning id into v_ballot;
+    delete from public.plan_poll_choices where ballot_id = v_ballot;
+  else
+    insert into public.plan_poll_ballots (plan_id, voter_name, voter_contact)
+    values (p_plan_id, btrim(p_name), btrim(p_contact))
+    returning id into v_ballot;
+  end if;
+
+  insert into public.plan_poll_choices (ballot_id, option_id)
+  select v_ballot, id from (select distinct unnest(p_option_ids) as id) x;
+end;
+$$;
+
+revoke all on function public.cast_poll_vote(uuid, uuid[], text, text, uuid) from public, anon, authenticated;
+
+-- The owner picks an option: the plan gets those dates and the poll closes.
+-- Not your plan, or not an option: option_not_found, the same either way.
+create or replace function public.pick_date_option(p_option_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_option public.plan_date_options;
+  v_plan   public.plans;
+begin
+  select * into v_option from public.plan_date_options where id = p_option_id;
+  if not found or auth.uid() is null or v_option.owner_id <> auth.uid() then
+    raise exception 'option_not_found' using errcode = 'P0002';
+  end if;
+  select * into v_plan from public.plans where id = v_option.plan_id for update;
+  if v_plan.poll_closed_at is not null then
+    raise exception 'poll_closed' using errcode = 'P0001';
+  end if;
+  update public.plans
+     set start_date = v_option.start_date,
+         end_date = v_option.end_date,
+         poll_closed_at = now(),
+         poll_picked_option_id = v_option.id
+   where id = v_plan.id
+  returning * into v_plan;
+  return to_jsonb(v_plan);
+end;
+$$;
+
+revoke all on function public.pick_date_option(uuid) from public, anon;
+grant execute on function public.pick_date_option(uuid) to authenticated;
 
 -- =============================================================================
 -- service_role (server-only key): keep this section last so it covers every

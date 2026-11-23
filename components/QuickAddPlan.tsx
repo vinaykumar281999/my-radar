@@ -60,6 +60,7 @@ const EMPTY: PlanInput = {
   start_date: "",
   end_date: "",
   dates_flexible: false,
+  decide_by: "",
   notes: "",
   visibility: "public",
   capacity: null,
@@ -134,6 +135,7 @@ function PlanForm({
           start_date: editing.start_date ?? "",
           end_date: editing.end_date ?? "",
           dates_flexible: editing.dates_flexible ?? false,
+          decide_by: editing.decide_by ?? "",
           notes: editing.notes ?? "",
           visibility: editing.visibility ?? "public",
           capacity: editing.capacity ?? null,
@@ -284,6 +286,8 @@ function PlanForm({
       start_date: start,
       end_date: end === start ? null : end,
       dates_flexible: isCarpool ? false : !!form.dates_flexible,
+      // Only Booking Soon plans have a decide-by date.
+      decide_by: form.status === "Booking Soon" ? form.decide_by || null : null,
       // Real dates replace the old free-text dates.
       specific_dates: start ? null : form.specific_dates?.trim() || null,
       notes: form.notes?.trim() || null,
@@ -453,6 +457,20 @@ function PlanForm({
         )}
       />
 
+      {form.status === "Booking Soon" && (
+        <div className="-mt-2 space-y-1.5">
+          <Label htmlFor="decide_by">Decide by (optional)</Label>
+          <Input
+            id="decide_by"
+            type="date"
+            value={form.decide_by ?? ""}
+            onChange={(e) => set("decide_by", e.target.value)}
+            className="h-11 text-base"
+          />
+          <p className="text-xs text-muted-foreground">Friends see a countdown, so they don&apos;t miss the cut-off.</p>
+        </div>
+      )}
+
       <div className="space-y-1.5">
         <PillGroup<Visibility>
           label="Who can see it"
@@ -580,7 +598,7 @@ function PlanForm({
             />
             <p className="text-xs text-muted-foreground">
               {form.capacity
-                ? `“I'm Interested” becomes “Request a spot”. You approve up to ${form.capacity}.${
+                ? `“I'm in” becomes “Request a spot”. You approve up to ${form.capacity}.${
                     capacitySource === "circle" ? " (This circle's default.)" : ""
                   }`
                 : "Set a number to approve who gets a spot."}
