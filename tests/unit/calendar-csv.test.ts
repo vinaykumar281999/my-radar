@@ -35,7 +35,9 @@ test("dates, buckets, sorting, .ics and CSV", () => {
   assert.equal(addDays("2026-12-31", 1), "2027-01-01");
   assert.deepEqual(daysInRange("2026-11-29", "2026-12-01"), ["2026-11-29", "2026-11-30", "2026-12-01"]);
   assert.equal(formatDateRange("2026-11-21"), "Sat, Nov 21");
-  assert.equal(formatDateRange("2026-11-21", "2026-11-23"), "Nov 21 – Nov 23");
+  assert.equal(formatDateRange("2026-11-21", "2026-11-23"), "Nov 21–23");
+  assert.equal(formatDateRange("2026-11-28", "2026-12-02"), "Nov 28 – Dec 2");
+  assert.equal(formatDateRange("2026-12-30", "2027-01-02"), "Dec 30, 2026 – Jan 2, 2027");
 
   const ics = buildCalendar([{ uid: "a@radar", title: "Ski, trip; 🎿 " + "x".repeat(100), start: "2026-12-30", end: "2027-01-02", description: "line1\nline2", url: "https://r.app/a/p/1" }], "Vinay's Radar");
   assert.match(ics, /DTSTART;VALUE=DATE:20261230\r\n/);
