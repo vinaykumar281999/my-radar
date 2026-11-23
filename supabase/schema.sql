@@ -222,6 +222,9 @@ alter table public.interests add constraint interests_status_check
   check (status in ('interested', 'pending', 'approved', 'declined', 'waitlisted'));
 -- Set when promote_waitlist moved this request from the waitlist to pending.
 alter table public.interests add column if not exists promoted_at timestamptz;
+-- Set when the promoted requester dismissed (or tapped) their "off the
+-- waitlist" notice. Only dismiss_promotion_notice() writes it.
+alter table public.interests add column if not exists promotion_seen_at timestamptz;
 create index if not exists interests_waitlist_idx on public.interests (plan_id, created_at, id) where status = 'waitlisted';
 
 -- Carpool rider flags, set by the rider when requesting a seat. They live on
@@ -757,6 +760,7 @@ begin
   -- approved requests) or someone is already waiting (no jumping the line).
   -- Plans without spots never waitlist: it's plain interest.
   new.promoted_at := null;
+  new.promotion_seen_at := null;
   if v_capacity is not null then
     if (select count(*) from public.interests i where i.plan_id = new.plan_id and i.status = 'approved') >= v_capacity
        or exists (select 1 from public.interests i where i.plan_id = new.plan_id and i.status = 'waitlisted') then
@@ -1475,7 +1479,7 @@ begin
   loop
     exit when v_used >= v_capacity;
     if public.can_user_see_plan(p_plan_id, r.user_id) then
-      update public.interests set status = 'pending', promoted_at = now() where id = r.id;
+      update public.interests set status = 'pending', promoted_at = now(), promotion_seen_at = null where id = r.id;
       v_used := v_used + 1;
       v_promoted := v_promoted + 1;
     end if;
@@ -1573,6 +1577,64 @@ $$;
 
 revoke all on function public.my_waitlist_position(uuid) from public, anon;
 grant execute on function public.my_waitlist_position(uuid) to authenticated;
+
+-- "You're off the waitlist" notices for the caller only: their own requests
+-- that promote_waitlist moved to pending, not yet dismissed, still pending
+-- (approved or declined ends the notice), on plans they can still see.
+-- Signed-out requests have no user, so they never get one.
+create or replace function public.my_promotion_notices()
+returns table (
+  interest_id        uuid,
+  plan_id            uuid,
+  plan_title         text,
+  owner_username     text,
+  owner_display_name text,
+  promoted_at        timestamptz
+)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select i.id, p.id, p.title, pr.username, pr.display_name, i.promoted_at
+    from public.interests i
+    join public.plans p on p.id = i.plan_id
+    join public.profiles pr on pr.id = p.user_id
+   where auth.uid() is not null
+     and i.user_id = auth.uid()
+     and i.status = 'pending'
+     and i.promoted_at is not null
+     and i.promotion_seen_at is null
+     and public.can_user_see_plan(p.id, auth.uid())
+   order by i.promoted_at desc, i.id;
+$$;
+
+revoke all on function public.my_promotion_notices() from public, anon;
+grant execute on function public.my_promotion_notices() to authenticated;
+
+-- Dismiss one of the caller's own notices. Someone else's request, a missing
+-- id, or no session all get request_not_found, the same as approve_spot.
+-- Dismissing twice is fine (the first time is kept).
+create or replace function public.dismiss_promotion_notice(p_interest_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  update public.interests
+     set promotion_seen_at = coalesce(promotion_seen_at, now())
+   where id = p_interest_id
+     and user_id = auth.uid()
+     and auth.uid() is not null;
+  if not found then
+    raise exception 'request_not_found' using errcode = 'P0002';
+  end if;
+end;
+$$;
+
+revoke all on function public.dismiss_promotion_notice(uuid) from public, anon;
+grant execute on function public.dismiss_promotion_notice(uuid) to authenticated;
 
 -- -----------------------------------------------------------------------------
 -- Private plan details (carpool pickup spot, driver contact). A separate table
