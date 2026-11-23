@@ -74,7 +74,10 @@ export function DemoPhone() {
           <PhoneFeed />
         </Suspense>
       </div>
-      <p className="mt-4 text-center text-xs text-muted-foreground">↑ Try it — tap &ldquo;I&apos;m Interested&rdquo;</p>
+      {/* Out of the flow, so the grid centres the phone itself against the copy. */}
+      <p className="absolute inset-x-0 top-full mt-4 text-center text-xs text-muted-foreground">
+        ↑ Try it — tap &ldquo;I&apos;m Interested&rdquo;
+      </p>
     </div>
   );
 }

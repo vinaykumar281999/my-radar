@@ -23,7 +23,8 @@ export default function LandingPage() {
 
       <main className="flex-1">
         <HeroDemoProvider>
-        <section className="mx-auto grid w-full max-w-6xl grid-cols-1 items-center gap-14 px-5 pt-8 pb-20 lg:grid-cols-[1.1fr_1fr] lg:pt-16">
+        {/* overflow-x-clip: the phone's glow may spill sideways on narrow screens; never scroll for it. */}
+        <section className="mx-auto grid w-full max-w-6xl grid-cols-1 items-center gap-14 overflow-x-clip px-5 pt-8 pb-20 lg:grid-cols-[1.1fr_1fr] lg:pt-16">
           <div className="min-w-0 text-center lg:text-left">
             <span className="inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
               <Sparkles className="size-3.5 text-primary" /> The link-in-bio for your plans
