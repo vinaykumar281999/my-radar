@@ -78,6 +78,8 @@ const rpcDenied = [
   ["create_circle_invite", { p_circle_id: ZERO, p_days: 7, p_max_uses: 1 }],
   ["promote_waitlist", { p_plan_id: ZERO }],
   ["my_waitlist_position", { p_plan_id: ZERO }],
+  ["my_promotion_notices", {}],
+  ["dismiss_promotion_notice", { p_interest_id: ZERO }],
 ];
 for (const [fn, args] of rpcDenied) {
   r = await sb.rpc(fn, args);

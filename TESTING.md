@@ -280,5 +280,17 @@ Use a plan with Spots: 1 and three accounts (or private windows) as requesters.
 - [ ] Exactly one circle ticked with default spots and Spots left empty → Spots fills in (hint "This circle's default"); tick a second circle → it clears; typing your own spots is never overwritten
 - [ ] A member of that circle can't see any of its defaults (Settings → "Circles you're in" shows only the name)
 
+## 24. Off-the-waitlist notices
+Two accounts: Owner (a plan with Spots: 1) and Requester. Fill the spot with someone else first.
+- [ ] Requester (signed in) joins the waitlist → card **Waitlist #1**; no banner anywhere
+- [ ] Owner: **Take back spot** on the approved person
+- [ ] Requester opens their **dashboard** → banner "You're off the waitlist for <plan>. <Owner> will confirm your spot."
+- [ ] Requester opens the owner's **profile** → same banner above the filters; the plan card says **Moved up from waitlist ✨**
+- [ ] Another owner's profile → no banner for this plan
+- [ ] Tap the banner → opens the plan page; back on the profile the banner is gone and the card says "Requested · waiting for an answer"
+- [ ] Two promotions at once → banners stack with **Dismiss all**
+- [ ] Owner approves or declines → the notice is gone; removed from the plan's circle → gone
+- [ ] Owner never sees a banner for anyone else's promotion; signed out → no banner, and the profile's server HTML is unchanged (`npm run test:leaks`)
+
 ## Known limitation
 - Unknown usernames return HTTP **200** (the not-found page streams in after the shell is sent). Visitors see the right page; only bots see a 200.
