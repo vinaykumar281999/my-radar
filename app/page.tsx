@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { ArrowRight, BellRing, Link2, Radar as RadarIcon, Sparkles } from "lucide-react";
+import { BellRing, Link2, Radar as RadarIcon, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LivePreview } from "@/components/LivePreview";
+import { HandleClaim } from "@/components/landing/HandleClaim";
 import { StatusPill } from "@/components/plan-meta";
 
 export default function LandingPage() {
@@ -17,8 +18,8 @@ export default function LandingPage() {
       </header>
 
       <main className="flex-1">
-        <section className="mx-auto grid w-full max-w-6xl items-center gap-14 px-5 pt-8 pb-20 lg:grid-cols-[1.1fr_1fr] lg:pt-16">
-          <div className="text-center lg:text-left">
+        <section className="mx-auto grid w-full max-w-6xl grid-cols-1 items-center gap-14 px-5 pt-8 pb-20 lg:grid-cols-[1.1fr_1fr] lg:pt-16">
+          <div className="min-w-0 text-center lg:text-left">
             <span className="inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
               <Sparkles className="size-3.5 text-primary" /> The link-in-bio for your plans
             </span>
@@ -33,16 +34,7 @@ export default function LandingPage() {
               <strong className="text-foreground">I&apos;m Interested 👋</strong> before the tickets are booked.
             </p>
 
-            <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center lg:justify-start">
-              <Button
-                render={<Link href="/login" />}
-                nativeButton={false}
-                className="h-12 rounded-full px-7 text-base font-semibold shadow-lg shadow-primary/25"
-              >
-                Claim Your Link <ArrowRight />
-              </Button>
-              <span className="text-sm text-muted-foreground">Free · 30-second setup</span>
-            </div>
+            <HandleClaim className="mx-auto mt-8 lg:mx-0" />
 
             <div className="mt-6 flex flex-wrap justify-center gap-2 lg:justify-start">
               <StatusPill status="Just an Idea" />

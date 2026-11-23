@@ -5,25 +5,23 @@ import { Check, Loader2, X } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { useHost } from "@/hooks/use-origin";
 import { createClient } from "@/lib/supabase/client";
-import { RESERVED_USERNAMES, USERNAME_RE } from "@/lib/types";
+import { RESERVED_USERNAMES } from "@/lib/types";
+import { cleanUsername, isValidUsername } from "@/lib/username";
+
+export { cleanUsername };
 
 export type Availability = "idle" | "current" | "checking" | "available" | "taken" | "invalid";
-
-/** Lowercase, allowed characters only, max 30. */
-export function cleanUsername(raw: string) {
-  return raw.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 30);
-}
 
 /**
  * Debounced availability check. Old usernames are reserved for their original
  * owner, so this asks the database (username_available) rather than reading
  * profiles directly. `current` is the caller's existing username, if any.
  */
-export function useUsernameAvailability(username: string, current?: string) {
+export function useUsernameAvailability(username: string, current?: string, delayMs = 350) {
   // Result of the last async lookup, keyed by the username it was for.
   const [lookup, setLookup] = useState<{ username: string; result: "available" | "taken" | "idle" } | null>(null);
 
-  const isValid = USERNAME_RE.test(username) && !RESERVED_USERNAMES.has(username);
+  const isValid = isValidUsername(username);
   const isCurrent = !!current && username === current;
 
   const availability: Availability = !username
@@ -43,12 +41,12 @@ export function useUsernameAvailability(username: string, current?: string) {
       const { data, error } = await createClient().rpc("username_available", { p_username: username });
       if (cancelled) return;
       setLookup({ username, result: error ? "idle" : data ? "available" : "taken" });
-    }, 350);
+    }, delayMs);
     return () => {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [username, isValid, isCurrent]);
+  }, [username, isValid, isCurrent, delayMs]);
 
   return {
     availability,
