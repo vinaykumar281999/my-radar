@@ -8,6 +8,7 @@
 // they own (profiles, plans, circles cascade). Needs SUPABASE_SERVICE_ROLE_KEY.
 import { createClient } from "@supabase/supabase-js";
 import { randomBytes, randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
 
 const BASE = (process.argv[2] ?? process.env.LEAK_TEST_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
 const URL_ = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -48,10 +49,43 @@ async function get(path) {
   return { status: res.status, type: res.headers.get("content-type") ?? "", body: Buffer.from(await res.arrayBuffer()) };
 }
 
+/**
+ * React Flight (the RSC payload in self.__next_f.push([1,"…"]) scripts) names
+ * its rows with hex ids from a counter. In dev, React also spends ids on debug
+ * bookkeeping for async work, and how many it spends depends on timing, so the
+ * same content can come out as row 154 in one render and 157 in the next.
+ *
+ * This joins the payload chunks (chunk boundaries are just streaming) and
+ * renames only Flight ids, in order of first appearance: row definitions at the
+ * start of a payload line, and reference strings like "$154", "$L155" or
+ * "$9d:props:children". Everything else, including all text, is untouched.
+ * User strings that start with "$" are escaped to "$$…" by React, so they never
+ * look like references and can't be renamed.
+ */
+const FLIGHT_PUSH = /<script>self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)<\/script>/g;
+const FLIGHT_ID = /^([0-9a-f]+):|"\$([L@FQWKBTYh]?)([0-9a-f]+)((?::[^"]*)?)"/gm;
+
+function canonicalFlight(html) {
+  let payload = "";
+  const rest = html.replace(FLIGHT_PUSH, (_, chunk) => {
+    payload += JSON.parse(chunk);
+    return "";
+  });
+  const ids = new Map();
+  const canon = (id) => {
+    if (!ids.has(id)) ids.set(id, `r${ids.size}`);
+    return ids.get(id);
+  };
+  // Definitions and references in one pass, so names follow document order.
+  const renamed = payload.replace(FLIGHT_ID, (_, rowId, prefix, refId, path) =>
+    rowId ? `${canon(rowId)}:` : `"$${prefix}${canon(refId)}${path}"`,
+  );
+  return `${rest}\n<!-- flight -->\n${renamed}`;
+}
+
 // Strip what legitimately differs between two renders of the same page.
 const normalize = (html) =>
-  html
-    .toString("utf8")
+  canonicalFlight(html.toString("utf8"))
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<uuid>")
     .replace(/"buildId":"[^"]*"/g, "")
     .replace(/nonce="[^"]*"/g, "")
@@ -69,10 +103,25 @@ const stripQuery = (html) =>
     .split(`?${FILTER_QS}`).join("")
     .split(FILTER_QS).join("");
 
+/** First differing position, compared by UTF-16 unit on both sides, with ~80 chars of context around it. */
 function firstDiff(a, b) {
-  const i = [...a].findIndex((ch, idx) => ch !== b[idx]);
-  const at = i === -1 ? Math.min(a.length, b.length) : i;
-  return `first difference at ${at}: …${a.slice(at - 60, at + 60)}… vs …${b.slice(at - 60, at + 60)}…`;
+  let at = 0;
+  const end = Math.min(a.length, b.length);
+  while (at < end && a.charCodeAt(at) === b.charCodeAt(at)) at++;
+  const ctx = (s) => JSON.stringify(s.slice(Math.max(0, at - 40), at + 40));
+  dumpDiff(a, b);
+  return `first difference at ${at} of ${a.length}/${b.length}:\n        A: ${ctx(a)}\n        B: ${ctx(b)}`;
+}
+
+// LEAK_TEST_DUMP=<dir>: write both sides of every failed comparison, for a full diff.
+let dumps = 0;
+function dumpDiff(a, b) {
+  const dir = process.env.LEAK_TEST_DUMP;
+  if (!dir) return;
+  mkdirSync(dir, { recursive: true });
+  dumps++;
+  writeFileSync(`${dir}/${dumps}-a.html`, a);
+  writeFileSync(`${dir}/${dumps}-b.html`, b);
 }
 
 const users = [];
