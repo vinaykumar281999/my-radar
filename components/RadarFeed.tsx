@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Lock, X } from "lucide-react";
 import { PlanCard } from "@/components/PlanCard";
+import { PromotionNotices } from "@/components/PromotionNotices";
 import { useViewer, useViewerStatus } from "@/components/ViewerContext";
 import { createClient } from "@/lib/supabase/client";
 import { CATEGORIES, STATUSES, groupByTimeframe, type Plan, type Spots } from "@/lib/types";
@@ -61,6 +62,8 @@ export function RadarFeed({
 
   return (
     <div className="mt-8 space-y-8">
+      {/* Viewer is null during the server render, so this never reaches server HTML. */}
+      <PromotionNotices viewerId={viewer && viewer.id !== ownerId ? viewer.id : null} ownerUsername={hostUsername} />
       <FilterChips filters={filters} onChange={setFilters} />
       {groups.length === 0 && (
         <p className="py-6 text-center text-sm text-muted-foreground">No plans match</p>

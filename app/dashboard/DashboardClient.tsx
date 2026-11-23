@@ -32,6 +32,7 @@ import { QuickAddPlan } from "@/components/QuickAddPlan";
 import { LeadsDrawer } from "@/components/LeadsDrawer";
 import { MonthView } from "@/components/MonthView";
 import { JoinNotices } from "@/components/JoinNotices";
+import { PromotionNotices } from "@/components/PromotionNotices";
 import { ViewAsDrawer, type ViewAsMember } from "@/components/ViewAsDrawer";
 import { AccountMenu } from "@/components/AccountMenu";
 import { InterestOverviewDrawer } from "@/components/InterestOverviewDrawer";
@@ -236,6 +237,8 @@ export function DashboardClient({
       </header>
 
       <JoinNotices initialNotices={initialJoinNotices} />
+      {/* Your own requests on other people's plans that moved off a waitlist. */}
+      <PromotionNotices viewerId={profile.id} className="mt-4" />
 
       {/* Profile + top bar */}
       <section className="tap-card mt-4 p-4">
