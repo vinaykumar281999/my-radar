@@ -54,6 +54,7 @@ for (const table of [
   "plan_audiences",
   "plan_private_details",
   "circle_settings",
+  "promotion_notice_seen",
 ]) {
   r = await sb.from(table).select("*").limit(5);
   check(`anon cannot read ${table}`, unreadable(r), describe(r));
@@ -78,6 +79,8 @@ const rpcDenied = [
   ["create_circle_invite", { p_circle_id: ZERO, p_days: 7, p_max_uses: 1 }],
   ["promote_waitlist", { p_plan_id: ZERO }],
   ["my_waitlist_position", { p_plan_id: ZERO }],
+  ["my_promotion_notices", {}],
+  ["dismiss_promotion_notice", { p_interest_id: ZERO }],
 ];
 for (const [fn, args] of rpcDenied) {
   r = await sb.rpc(fn, args);

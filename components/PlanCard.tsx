@@ -15,6 +15,7 @@ import { useViewer, useViewerStatus } from "@/components/ViewerContext";
 import { CarpoolDetails } from "@/components/CarpoolDetails";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
+import { PROMOTION_DISMISSED_EVENT, isUnseenPromotion } from "@/lib/promotion-notices";
 import type { InterestStatus, Plan, Spots } from "@/lib/types";
 
 const REQUEST_LABEL: Record<InterestStatus, string> = {
@@ -68,6 +69,8 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
   const request = sentStatus ?? myRequest?.status ?? null;
   // Their own place in line (my_waitlist_position answers only about the caller).
   const position = !sentStatus || sentStatus === myRequest?.status ? myRequest?.position : null;
+  // Moved off the waitlist and not dismissed yet (a fresh request never is).
+  const movedUp = !sentStatus && request === "pending" && !!myRequest?.movedUp;
   const signedOut = useViewerStatus() === "signed_out";
   const seatWord = isCarpool ? "seat" : "spot";
 
@@ -126,7 +129,11 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
       <div className="mt-4 flex gap-2">
         {request && hasSpots ? (
           <p className="flex h-11 flex-1 items-center justify-center rounded-xl bg-muted text-sm font-semibold">
-            {request === "waitlisted" && position ? `Waitlist #${position}` : REQUEST_LABEL[request]}
+            {request === "waitlisted" && position
+              ? `Waitlist #${position}`
+              : movedUp
+                ? "Moved up from waitlist ✨"
+                : REQUEST_LABEL[request]}
           </p>
         ) : isCarpool && signedOut && !demo ? (
           <Button
@@ -248,14 +255,19 @@ function CopyToRadarButton({
   );
 }
 
-type MyRequest = { status: InterestStatus; position: number | null };
+type MyRequest = {
+  status: InterestStatus;
+  position: number | null;
+  /** Promoted from the waitlist and the notice isn't dismissed yet. */
+  movedUp: boolean;
+};
 
 /**
  * The signed-in viewer's own request on a plan with spots (RLS: only their own
  * row), plus their own waitlist position when they're waiting.
  */
 function useMyRequest(planId: string, viewerId: string | null): MyRequest | null {
-  const [loaded, setLoaded] = useState<{ key: string; request: MyRequest | null } | null>(null);
+  const [loaded, setLoaded] = useState<{ key: string; interestId: string | null; request: MyRequest | null } | null>(null);
   const key = `${planId}:${viewerId}`;
 
   useEffect(() => {
@@ -265,23 +277,49 @@ function useMyRequest(planId: string, viewerId: string | null): MyRequest | null
     (async () => {
       const { data } = await supabase
         .from("interests")
-        .select("status")
+        .select("id, status, promoted_at")
         .eq("plan_id", planId)
         .eq("user_id", viewerId)
-        .maybeSingle<{ status: InterestStatus }>();
+        .maybeSingle<{ id: string; status: InterestStatus; promoted_at: string | null }>();
       let position: number | null = null;
       if (data?.status === "waitlisted") {
         const { data: pos } = await supabase.rpc("my_waitlist_position", { p_plan_id: planId });
         position = typeof pos === "number" ? pos : null;
       }
+      // Dismissed? Kept in promotion_notice_seen, which only the requester can read.
+      let seen = false;
+      if (data && isUnseenPromotion(data, false)) {
+        const { data: seenRow } = await supabase
+          .from("promotion_notice_seen")
+          .select("interest_id")
+          .eq("interest_id", data.id)
+          .maybeSingle<{ interest_id: string }>();
+        seen = !!seenRow;
+      }
       if (!cancelled) {
-        setLoaded({ key: `${planId}:${viewerId}`, request: data ? { status: data.status, position } : null });
+        setLoaded({
+          key: `${planId}:${viewerId}`,
+          interestId: data?.id ?? null,
+          request: data ? { status: data.status, position, movedUp: isUnseenPromotion(data, seen) } : null,
+        });
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [planId, viewerId]);
+
+  // The banner was dismissed (or tapped) somewhere on the page: drop the label too.
+  useEffect(() => {
+    const onDismissed = (e: Event) => {
+      const ids = (e as CustomEvent<string[]>).detail;
+      setLoaded((l) =>
+        l?.request && l.interestId && ids.includes(l.interestId) ? { ...l, request: { ...l.request, movedUp: false } } : l,
+      );
+    };
+    window.addEventListener(PROMOTION_DISMISSED_EVENT, onDismissed);
+    return () => window.removeEventListener(PROMOTION_DISMISSED_EVENT, onDismissed);
+  }, []);
 
   return loaded?.key === key ? loaded.request : null;
 }
