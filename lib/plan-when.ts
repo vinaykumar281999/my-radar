@@ -1,4 +1,4 @@
-import { addDays, formatDateRange, isoFromParts, todayIso, toUtcDate } from "@/lib/dates";
+import { addDays, formatDateRange, isoFromParts, localIsoDate, toUtcDate } from "@/lib/dates";
 import type { Plan, Timeframe } from "@/lib/types";
 
 /**
@@ -9,6 +9,10 @@ import type { Plan, Timeframe } from "@/lib/types";
  * Month" in November. Everything here re-anchors it at created_at and labels
  * it against today. Free-text dates like "Nov25-30" are read as real dates
  * when they're unambiguous, and shown as "Nov 25–30".
+ *
+ * "Today" and the day a plan was made are calendar dates in the viewer's time
+ * zone (pass it as timeZone; omitted, it's the zone of whoever runs this). At
+ * 11pm on Nov 30 in Denver it's still November, even though it's Dec 1 in UTC.
  */
 
 export type PlanWhenInput = Pick<Plan, "timeframe" | "specific_dates" | "start_date" | "end_date" | "created_at"> &
@@ -151,11 +155,11 @@ function periodLabel(timeframe: Timeframe, period: { start: string; end: string 
   }
 }
 
-export function planWhen(plan: PlanWhenInput, today = todayIso()): PlanWhen {
-  const madeOn = plan.created_at.slice(0, 10);
+export function planWhen(plan: PlanWhenInput, today = localIsoDate(), timeZone?: string): PlanWhen {
+  const madeOn = localIsoDate(new Date(plan.created_at), timeZone);
 
   if (plan.departs_at) {
-    const day = plan.departs_at.slice(0, 10);
+    const day = localIsoDate(new Date(plan.departs_at), timeZone);
     return { label: "", dates: { start: day, end: day }, rawDates: null, past: day < today, sortKey: day < today ? today : day, lastDay: day };
   }
 
@@ -188,8 +192,8 @@ export function planWhen(plan: PlanWhenInput, today = todayIso()): PlanWhen {
  * Soonest first. Plans with real dates go before vaguer ones on the same day,
  * newest first after that. Plans that are already over go last, latest first.
  */
-export function sortByWhen<T extends PlanWhenInput>(plans: T[], today = todayIso()): T[] {
-  const keyed = plans.map((plan) => ({ plan, when: planWhen(plan, today) }));
+export function sortByWhen<T extends PlanWhenInput>(plans: T[], today = localIsoDate(), timeZone?: string): T[] {
+  const keyed = plans.map((plan) => ({ plan, when: planWhen(plan, today, timeZone) }));
   return keyed
     .sort((a, b) => {
       if (a.when.past !== b.when.past) return a.when.past ? 1 : -1;

@@ -7,8 +7,19 @@ const MS_DAY = 86_400_000;
 
 export const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** Today's date in UTC. Server renders use this so every request agrees. */
 export function todayIso() {
   return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * The calendar date ("YYYY-MM-DD") of an instant in a time zone; by default the
+ * zone of whoever runs it, so in the browser it's the viewer's own date.
+ */
+export function localIsoDate(at: Date = new Date(), timeZone?: string) {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(at);
+  const get = (type: string) => parts.find((p) => p.type === type)!.value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
 export function toUtcDate(iso: string) {

@@ -38,6 +38,7 @@ import { InterestOverviewDrawer } from "@/components/InterestOverviewDrawer";
 import { StoryExportModal } from "@/components/StoryExportModal";
 import { copyText } from "@/components/ShareButton";
 import { useOrigin } from "@/hooks/use-origin";
+import { useLocalToday, type LocalToday } from "@/hooks/use-local-today";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { formatDeparture } from "@/lib/dates";
@@ -86,7 +87,12 @@ export function DashboardClient({
   const publicPath = `/${profile.username}`;
   const shortLink = origin ? `${origin.replace(/^https?:\/\//, "")}${publicPath}` : publicPath;
 
-  const active = sortByWhen(plans.filter((p) => !p.is_archived));
+  const localToday = useLocalToday();
+  const active = sortByWhen(
+    plans.filter((p) => !p.is_archived),
+    localToday.today,
+    localToday.timeZone,
+  );
   const archived = plans.filter((p) => p.is_archived);
   const totalInterested = active.reduce((n, p) => n + p.interest_count, 0);
 
@@ -348,6 +354,7 @@ export function DashboardClient({
                 onLeads={() => openLeads(plan)}
                 onCopyLink={() => copyPlanLink(plan)}
                 onChain={() => copyChainLink(plan)}
+                localToday={localToday}
                 circleNames={circleNames(plan.id)}
               />
             ))}
@@ -460,6 +467,7 @@ type ManagePlanRowProps = {
   onCopyLink: () => void;
   onChain: () => void;
   circleNames: string[];
+  localToday: LocalToday;
 };
 
 function ManagePlanRow({
@@ -472,10 +480,11 @@ function ManagePlanRow({
   onCopyLink,
   onChain,
   circleNames,
+  localToday,
 }: ManagePlanRowProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const isCarpool = plan.category === "Carpool";
-  const when = planWhen(plan);
+  const when = planWhen(plan, localToday.today, localToday.timeZone);
   const chained = !!(plan.suggested_by_handle || plan.chained_from_plan_id);
   // Only public plans can be copied (and so chained) by friends; never rides.
   const canChain = !chained && plan.visibility === "public" && !isCarpool;
