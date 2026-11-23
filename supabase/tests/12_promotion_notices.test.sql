@@ -54,9 +54,10 @@ select t.eq((select to_jsonb(n) - 'promoted_at' from my_promotion_notices() n),
   '{"interest_id": "a0000000-0000-0000-0000-00000000000b", "plan_id": "f1f1f1f1-0000-0000-0000-000000000001", "plan_title": "Circle cabin", "owner_username": "alice", "owner_display_name": "Alice"}'::jsonb,
   'the promoted user sees their notice, with plan and owner');
 select t.ok((select promoted_at is not null from my_promotion_notices()), '...and when it happened');
-select t.throws($$update interests set promotion_seen_at = now() where id = 'a0000000-0000-0000-0000-00000000000b'$$,
-  'permission denied', 'promotion_seen_at can''t be written directly');
 reset role;
+select t.eq((select count(*) from information_schema.columns
+              where table_schema = 'public' and table_name = 'interests' and column_name ilike '%seen%'), 0::bigint,
+  'interests has no seen column at all');
 
 -- ===== Nobody else sees anything =====
 set role authenticated; select t.as_user(:C);
@@ -103,8 +104,36 @@ set role authenticated; select t.as_user(:B);
 select t.eq((select count(*) from my_promotion_notices()), 1::bigint, 'failed attempts left Bob''s notice alone');
 select dismiss_promotion_notice('a0000000-0000-0000-0000-00000000000b');
 select t.eq((select count(*) from my_promotion_notices()), 0::bigint, 'Bob dismissed his notice');
+select t.eq((select count(*) from promotion_notice_seen), 1::bigint, 'Bob reads his own seen row');
 select dismiss_promotion_notice('a0000000-0000-0000-0000-00000000000b');
 select t.eq((select status from interests where id = 'a0000000-0000-0000-0000-00000000000b'), 'pending', 'dismissing twice is harmless and changes nothing else');
+select t.eq((select count(*) from promotion_notice_seen), 1::bigint, '...and keeps one seen row');
+select t.throws($$update promotion_notice_seen set seen_at = now()$$, 'permission denied', 'seen rows can''t be changed');
+select t.throws($$delete from promotion_notice_seen$$, 'permission denied', 'seen rows can''t be removed (no un-dismissing)');
+select t.throws($$insert into promotion_notice_seen (interest_id, user_id) values ('a0000000-0000-0000-0000-00000000000c', 'bbbbbbbb-0000-0000-0000-00000000000b')$$,
+  'row-level security', 'Bob can''t mark Carol''s notice as seen');
+reset role;
+
+-- ===== The owner gets no read receipt =====
+set role authenticated; select t.as_user(:A);
+select t.eq((select count(*) from promotion_notice_seen), 0::bigint, 'the owner can''t read promotion_notice_seen');
+select t.eq((select count(*) from interests where plan_id = :PC), 4::bigint, 'the owner still reads every request on the plan');
+select t.eq((select count(*) from interests i, jsonb_object_keys(to_jsonb(i)) k where i.plan_id = :PC and k ilike '%seen%'), 0::bigint,
+  'the owner''s interests rows have no seen column');
+select t.throws($$insert into promotion_notice_seen (interest_id, user_id) values ('a0000000-0000-0000-0000-00000000000c', 'aaaaaaaa-0000-0000-0000-00000000000a')$$,
+  'row-level security', 'the owner can''t write one either');
+reset role;
+
+-- ===== Non-members and anon =====
+set role authenticated; select t.as_user(:F);
+select t.eq((select count(*) from promotion_notice_seen), 0::bigint, 'a non-member reads no seen rows');
+select t.throws($$insert into promotion_notice_seen (interest_id, user_id) values ('a0000000-0000-0000-0000-00000000000c', 'ffffffff-0000-0000-0000-00000000000f')$$,
+  'row-level security', 'a non-member can''t write one');
+reset role;
+set role anon; select t.as_user(null);
+select t.throws($$select * from promotion_notice_seen$$, 'permission denied', 'anon can''t read promotion_notice_seen');
+select t.throws($$insert into promotion_notice_seen (interest_id, user_id) values ('a0000000-0000-0000-0000-00000000000c', 'cccccccc-0000-0000-0000-00000000000c')$$,
+  'permission denied', 'anon can''t write it');
 reset role;
 
 -- ===== Approved or declined: the notice is gone =====
@@ -162,10 +191,15 @@ set role authenticated; select t.as_user(:B);
 select t.eq((select count(*) from my_promotion_notices()), 0::bigint, 'nor does anyone else');
 reset role;
 
--- ===== A fresh request never arrives already seen or promoted =====
+-- ===== A fresh request never arrives already promoted =====
 set role service_role;
-insert into interests (id, plan_id, visitor_name, contact_handle, user_id, promoted_at, promotion_seen_at)
-  values ('d0000000-0000-0000-0000-000000000001', :P3, 'Frank', '@frank', :F, now(), now());
-select t.ok((select promoted_at is null and promotion_seen_at is null from interests where id = 'd0000000-0000-0000-0000-000000000001'),
-  'insert can''t preset promoted_at or promotion_seen_at');
+insert into interests (id, plan_id, visitor_name, contact_handle, user_id, promoted_at)
+  values ('d0000000-0000-0000-0000-000000000001', :P3, 'Frank', '@frank', :F, now());
+select t.ok((select promoted_at is null from interests where id = 'd0000000-0000-0000-0000-000000000001'),
+  'insert can''t preset promoted_at');
 reset role;
+
+-- ===== Deleting a request takes its seen row with it =====
+select t.eq((select count(*) from promotion_notice_seen where interest_id = 'a0000000-0000-0000-0000-00000000000b'), 1::bigint, 'setup: Bob''s seen row exists');
+delete from interests where id = 'a0000000-0000-0000-0000-00000000000b';
+select t.eq((select count(*) from promotion_notice_seen where interest_id = 'a0000000-0000-0000-0000-00000000000b'), 0::bigint, 'request deleted: seen row deleted');

@@ -54,6 +54,7 @@ for (const table of [
   "plan_audiences",
   "plan_private_details",
   "circle_settings",
+  "promotion_notice_seen",
 ]) {
   r = await sb.from(table).select("*").limit(5);
   check(`anon cannot read ${table}`, unreadable(r), describe(r));

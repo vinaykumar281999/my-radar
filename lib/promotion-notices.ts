@@ -13,11 +13,10 @@ export type PromotionNotice = {
 /**
  * The viewer's own request was moved off the waitlist and they haven't
  * dismissed the notice. Once it's approved or declined there's nothing to say.
+ * `seen` comes from promotion_notice_seen (only the requester can read it).
  */
-export function isUnseenPromotion(
-  row: Pick<Interest, "status" | "promoted_at"> & { promotion_seen_at?: string | null },
-): boolean {
-  return row.status === "pending" && row.promoted_at != null && row.promotion_seen_at == null;
+export function isUnseenPromotion(row: Pick<Interest, "status" | "promoted_at">, seen: boolean): boolean {
+  return row.status === "pending" && row.promoted_at != null && !seen;
 }
 
 /** "You're off the waitlist for Cabin. Alice will confirm your spot." */

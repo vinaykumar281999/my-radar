@@ -277,20 +277,30 @@ function useMyRequest(planId: string, viewerId: string | null): MyRequest | null
     (async () => {
       const { data } = await supabase
         .from("interests")
-        .select("id, status, promoted_at, promotion_seen_at")
+        .select("id, status, promoted_at")
         .eq("plan_id", planId)
         .eq("user_id", viewerId)
-        .maybeSingle<{ id: string; status: InterestStatus; promoted_at: string | null; promotion_seen_at: string | null }>();
+        .maybeSingle<{ id: string; status: InterestStatus; promoted_at: string | null }>();
       let position: number | null = null;
       if (data?.status === "waitlisted") {
         const { data: pos } = await supabase.rpc("my_waitlist_position", { p_plan_id: planId });
         position = typeof pos === "number" ? pos : null;
       }
+      // Dismissed? Kept in promotion_notice_seen, which only the requester can read.
+      let seen = false;
+      if (data && isUnseenPromotion(data, false)) {
+        const { data: seenRow } = await supabase
+          .from("promotion_notice_seen")
+          .select("interest_id")
+          .eq("interest_id", data.id)
+          .maybeSingle<{ interest_id: string }>();
+        seen = !!seenRow;
+      }
       if (!cancelled) {
         setLoaded({
           key: `${planId}:${viewerId}`,
           interestId: data?.id ?? null,
-          request: data ? { status: data.status, position, movedUp: isUnseenPromotion(data) } : null,
+          request: data ? { status: data.status, position, movedUp: isUnseenPromotion(data, seen) } : null,
         });
       }
     })();

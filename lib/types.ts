@@ -119,8 +119,6 @@ export type Interest = {
   large_bag: boolean;
   /** Set when this request was moved from the waitlist to pending. */
   promoted_at: string | null;
-  /** When the requester dismissed their "off the waitlist" notice. */
-  promotion_seen_at: string | null;
   created_at: string;
 };
 

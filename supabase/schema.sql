@@ -222,9 +222,6 @@ alter table public.interests add constraint interests_status_check
   check (status in ('interested', 'pending', 'approved', 'declined', 'waitlisted'));
 -- Set when promote_waitlist moved this request from the waitlist to pending.
 alter table public.interests add column if not exists promoted_at timestamptz;
--- Set when the promoted requester dismissed (or tapped) their "off the
--- waitlist" notice. Only dismiss_promotion_notice() writes it.
-alter table public.interests add column if not exists promotion_seen_at timestamptz;
 create index if not exists interests_waitlist_idx on public.interests (plan_id, created_at, id) where status = 'waitlisted';
 
 -- Carpool rider flags, set by the rider when requesting a seat. They live on
@@ -760,7 +757,6 @@ begin
   -- approved requests) or someone is already waiting (no jumping the line).
   -- Plans without spots never waitlist: it's plain interest.
   new.promoted_at := null;
-  new.promotion_seen_at := null;
   if v_capacity is not null then
     if (select count(*) from public.interests i where i.plan_id = new.plan_id and i.status = 'approved') >= v_capacity
        or exists (select 1 from public.interests i where i.plan_id = new.plan_id and i.status = 'waitlisted') then
@@ -1479,7 +1475,9 @@ begin
   loop
     exit when v_used >= v_capacity;
     if public.can_user_see_plan(p_plan_id, r.user_id) then
-      update public.interests set status = 'pending', promoted_at = now(), promotion_seen_at = null where id = r.id;
+      update public.interests set status = 'pending', promoted_at = now() where id = r.id;
+      -- A fresh promotion is a fresh notice.
+      delete from public.promotion_notice_seen where interest_id = r.id;
       v_used := v_used + 1;
       v_promoted := v_promoted + 1;
     end if;
@@ -1578,6 +1576,55 @@ $$;
 revoke all on function public.my_waitlist_position(uuid) from public, anon;
 grant execute on function public.my_waitlist_position(uuid) to authenticated;
 
+-- When a requester dismissed their "off the waitlist" notice. Its own table,
+-- not a column on interests: the plan owner reads every interests row (and
+-- column) of their plans, so a column there would work as a read receipt.
+-- Only the requester can read or add their own rows; nobody can change or
+-- remove them (they go when the request is deleted).
+create table if not exists public.promotion_notice_seen (
+  interest_id uuid primary key references public.interests (id) on delete cascade,
+  user_id     uuid not null references public.profiles (id) on delete cascade,
+  seen_at     timestamptz not null default now()
+);
+
+alter table public.promotion_notice_seen enable row level security;
+revoke all on public.promotion_notice_seen from public, anon, authenticated;
+grant select, insert on public.promotion_notice_seen to authenticated;
+
+drop policy if exists "promotion_seen_select_own" on public.promotion_notice_seen;
+create policy "promotion_seen_select_own" on public.promotion_notice_seen
+  for select to authenticated using (user_id = auth.uid());
+
+-- Only for your own request: otherwise anyone could pre-mark someone else's
+-- notice as seen by pairing their own user_id with that interest_id.
+drop policy if exists "promotion_seen_insert_own" on public.promotion_notice_seen;
+create policy "promotion_seen_insert_own" on public.promotion_notice_seen
+  for insert to authenticated
+  with check (
+    user_id = auth.uid()
+    and exists (select 1 from public.interests i where i.id = interest_id and i.user_id = auth.uid())
+  );
+
+-- Earlier builds of this branch kept it as interests.promotion_seen_at: move
+-- any values over, then drop the column so the owner can't read it.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public' and table_name = 'interests' and column_name = 'promotion_seen_at'
+  ) then
+    execute $m$
+      insert into public.promotion_notice_seen (interest_id, user_id, seen_at)
+      select id, user_id, promotion_seen_at
+        from public.interests
+       where promotion_seen_at is not null and user_id is not null
+      on conflict (interest_id) do nothing
+    $m$;
+    alter table public.interests drop column promotion_seen_at;
+  end if;
+end;
+$$;
+
 -- "You're off the waitlist" notices for the caller only: their own requests
 -- that promote_waitlist moved to pending, not yet dismissed, still pending
 -- (approved or declined ends the notice), on plans they can still see.
@@ -1604,7 +1651,7 @@ as $$
      and i.user_id = auth.uid()
      and i.status = 'pending'
      and i.promoted_at is not null
-     and i.promotion_seen_at is null
+     and not exists (select 1 from public.promotion_notice_seen s where s.interest_id = i.id)
      and public.can_user_see_plan(p.id, auth.uid())
    order by i.promoted_at desc, i.id;
 $$;
@@ -1622,14 +1669,17 @@ security definer
 set search_path = ''
 as $$
 begin
-  update public.interests
-     set promotion_seen_at = coalesce(promotion_seen_at, now())
-   where id = p_interest_id
-     and user_id = auth.uid()
-     and auth.uid() is not null;
+  perform 1
+     from public.interests
+    where id = p_interest_id
+      and user_id = auth.uid()
+      and auth.uid() is not null;
   if not found then
     raise exception 'request_not_found' using errcode = 'P0002';
   end if;
+  insert into public.promotion_notice_seen (interest_id, user_id)
+  values (p_interest_id, auth.uid())
+  on conflict (interest_id) do nothing;
 end;
 $$;
 

@@ -20,12 +20,11 @@ const notice = (over: Partial<PromotionNotice> = {}): PromotionNotice => ({
 
 test("only a still-pending, promoted, undismissed request counts as unseen", () => {
   const promoted = "2026-11-23T10:00:00Z";
-  assert.equal(isUnseenPromotion({ status: "pending", promoted_at: promoted, promotion_seen_at: null }), true);
-  assert.equal(isUnseenPromotion({ status: "pending", promoted_at: promoted }), true, "column not loaded yet: treat as unseen");
-  assert.equal(isUnseenPromotion({ status: "pending", promoted_at: promoted, promotion_seen_at: promoted }), false, "dismissed");
-  assert.equal(isUnseenPromotion({ status: "pending", promoted_at: null, promotion_seen_at: null }), false, "never on the waitlist");
+  assert.equal(isUnseenPromotion({ status: "pending", promoted_at: promoted }, false), true);
+  assert.equal(isUnseenPromotion({ status: "pending", promoted_at: promoted }, true), false, "dismissed");
+  assert.equal(isUnseenPromotion({ status: "pending", promoted_at: null }, false), false, "never on the waitlist");
   for (const status of INTEREST_STATUSES.filter((s) => s !== "pending")) {
-    assert.equal(isUnseenPromotion({ status, promoted_at: promoted, promotion_seen_at: null }), false, status);
+    assert.equal(isUnseenPromotion({ status, promoted_at: promoted }, false), false, status);
   }
 });
 
