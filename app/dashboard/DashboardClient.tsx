@@ -40,6 +40,7 @@ import { ViewAsDrawer, type ViewAsMember } from "@/components/ViewAsDrawer";
 import { AccountMenu } from "@/components/AccountMenu";
 import { InterestOverviewDrawer } from "@/components/InterestOverviewDrawer";
 import { PollDrawer } from "@/components/PollDrawer";
+import { DecideBy } from "@/components/DecideBy";
 import { StoryExportModal } from "@/components/StoryExportModal";
 import { copyText } from "@/components/ShareButton";
 import { useOrigin } from "@/hooks/use-origin";
@@ -549,6 +550,7 @@ function ManagePlanRow({
             <EyeOff className="size-2.5" /> Unlisted
           </span>
         )}
+        {plan.status === "Booking Soon" && plan.decide_by && <DecideBy date={plan.decide_by} className="px-1.5 py-px text-[10px]" />}
         {canPoll && plan.poll_option_count > 0 && (
           <button
             type="button"

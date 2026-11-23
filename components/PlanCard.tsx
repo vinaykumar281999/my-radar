@@ -14,6 +14,7 @@ import { canCopyPlan } from "@/lib/audience";
 import { useViewer, useViewerStatus } from "@/components/ViewerContext";
 import { CarpoolDetails } from "@/components/CarpoolDetails";
 import { DatePoll } from "@/components/DatePoll";
+import { DecideBy } from "@/components/DecideBy";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { PROMOTION_DISMISSED_EVENT, isUnseenPromotion } from "@/lib/promotion-notices";
@@ -45,6 +46,7 @@ type PlanCardProps = {
         | "departs_at"
         | "departs_tz"
         | "poll_closed_at"
+        | "decide_by"
       >
     >;
   hostName: string;
@@ -112,6 +114,12 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
       )}
 
       {plan.dates_flexible && !isCarpool && <FlexibleDatesLabel className="mt-1.5 ml-2 first:ml-0" />}
+
+      {plan.status === "Booking Soon" && plan.decide_by && (
+        <p className="mt-2">
+          <DecideBy date={plan.decide_by} />
+        </p>
+      )}
 
       {plan.notes && <p className="mt-2 text-sm leading-relaxed text-foreground/80">{plan.notes}</p>}
 

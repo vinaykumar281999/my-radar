@@ -72,6 +72,8 @@ export type Plan = {
   /** Date poll: set when the owner picked an option (the poll is then closed). */
   poll_closed_at: string | null;
   poll_picked_option_id: string | null;
+  /** Booking Soon plans: an optional "decide by" date ("YYYY-MM-DD"), shown publicly. */
+  decide_by: string | null;
   created_at: string;
 };
 
@@ -265,6 +267,7 @@ export type PlanInput = Pick<
   | "start_date"
   | "end_date"
   | "dates_flexible"
+  | "decide_by"
   | "status"
   | "notes"
   | "visibility"

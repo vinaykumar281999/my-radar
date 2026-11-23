@@ -1745,6 +1745,8 @@ create policy "private_details_approved" on public.plan_private_details
 -- gets counts through plan_poll(), under the plan's own visibility rules.
 -- =============================================================================
 alter table public.plans add column if not exists poll_closed_at timestamptz;
+-- "Decide by" on Booking Soon plans: a public date, like the plan's own dates.
+alter table public.plans add column if not exists decide_by date;
 -- The option the owner picked (no foreign key: options can't be removed once picked).
 alter table public.plans add column if not exists poll_picked_option_id uuid;
 

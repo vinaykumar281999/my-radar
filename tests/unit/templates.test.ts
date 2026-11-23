@@ -12,6 +12,7 @@ const EMPTY: PlanInput = {
   start_date: "",
   end_date: "",
   dates_flexible: false,
+  decide_by: "",
   notes: "",
   visibility: "public",
   capacity: null,
