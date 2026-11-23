@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { BellRing, Link2, Radar as RadarIcon, Sparkles } from "lucide-react";
+import { Radar as RadarIcon, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DemoPhone, DemoStatusSwitch, HeroDemoProvider } from "@/components/demo/HeroDemo";
 import { HandleClaim } from "@/components/landing/HandleClaim";
+import { HowItWorks } from "@/components/landing/HowItWorks";
 
 export default function LandingPage() {
   return (
@@ -49,33 +50,7 @@ export default function LandingPage() {
         </section>
         </HeroDemoProvider>
 
-        <section className="border-t bg-muted/30">
-          <div className="mx-auto grid w-full max-w-6xl gap-4 px-5 py-16 sm:grid-cols-3">
-            {[
-              {
-                icon: Link2,
-                title: "One link, every plan",
-                body: "Put radar.app/you in your Instagram bio or WhatsApp status. Update it in seconds.",
-              },
-              {
-                icon: BellRing,
-                title: "Friends raise their hand",
-                body: "No app or login for them — just name, handle, and an optional note.",
-              },
-              {
-                icon: Sparkles,
-                title: "Story-ready cards",
-                body: "Download a 9:16 card of your plans and drop it straight into your Story.",
-              },
-            ].map(({ icon: Icon, title, body }) => (
-              <div key={title} className="tap-card p-5">
-                <Icon className="size-6 text-primary" />
-                <h3 className="mt-3 font-bold">{title}</h3>
-                <p className="mt-1 text-sm text-muted-foreground">{body}</p>
-              </div>
-            ))}
-          </div>
-        </section>
+        <HowItWorks />
       </main>
 
       <footer className="border-t py-6 text-center text-xs text-muted-foreground">
