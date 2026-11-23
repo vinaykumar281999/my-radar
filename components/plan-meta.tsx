@@ -27,9 +27,9 @@ export const STATUS_STYLES: Record<Status, { pill: string; dot: string; hex: str
     hex: "#8b5cf6",
   },
   "Booking Soon": {
-    pill: "bg-amber-100 text-amber-800 ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/30",
-    dot: "bg-amber-500 animate-pulse",
-    hex: "#f59e0b",
+    pill: "bg-orange-100 text-orange-800 ring-orange-200 dark:bg-orange-500/15 dark:text-orange-300 dark:ring-orange-500/30",
+    dot: "bg-orange-500 animate-pulse",
+    hex: "#f97316",
   },
   "Locked In": {
     pill: "bg-emerald-100 text-emerald-800 ring-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/30",

@@ -12,13 +12,13 @@ import {
   Eye,
   EyeOff,
   ImageDown,
-  Link2,
+  ChevronDown,
+  ChevronRight,
   Lightbulb,
-  LogOut,
   Pencil,
   Plus,
   Radar as RadarIcon,
-  Settings,
+  Share2,
   Trash2,
   Users,
   UsersRound,
@@ -33,13 +33,16 @@ import { LeadsDrawer } from "@/components/LeadsDrawer";
 import { MonthView } from "@/components/MonthView";
 import { JoinNotices } from "@/components/JoinNotices";
 import { ViewAsDrawer, type ViewAsMember } from "@/components/ViewAsDrawer";
+import { AccountMenu } from "@/components/AccountMenu";
+import { InterestOverviewDrawer } from "@/components/InterestOverviewDrawer";
 import { StoryExportModal } from "@/components/StoryExportModal";
 import { copyText } from "@/components/ShareButton";
 import { useOrigin } from "@/hooks/use-origin";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { formatDateRange, formatDeparture } from "@/lib/dates";
-import { STATUSES, sortPlans, type BlockResult, type CircleOption, countLeads, type LeadCounts, type JoinNotice, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
+import { formatDeparture } from "@/lib/dates";
+import { planWhen, sortByWhen } from "@/lib/plan-when";
+import { STATUSES, type BlockResult, type CircleOption, countLeads, type LeadCounts, type JoinNotice, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
 
 type DashboardClientProps = {
   profile: Profile;
@@ -74,6 +77,8 @@ export function DashboardClient({
   const [view, setView] = useState<"list" | "month">("list");
   const [audiences, setAudiences] = useState(initialAudiences);
   const [viewAsOpen, setViewAsOpen] = useState(false);
+  const [interestOpen, setInterestOpen] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const circleNames = (planId: string) =>
     (audiences[planId] ?? []).map((id) => circles.find((c) => c.id === id)?.name).filter(Boolean) as string[];
   const origin = useOrigin();
@@ -81,7 +86,7 @@ export function DashboardClient({
   const publicPath = `/${profile.username}`;
   const shortLink = origin ? `${origin.replace(/^https?:\/\//, "")}${publicPath}` : publicPath;
 
-  const active = sortPlans(plans.filter((p) => !p.is_archived));
+  const active = sortByWhen(plans.filter((p) => !p.is_archived));
   const archived = plans.filter((p) => p.is_archived);
   const totalInterested = active.reduce((n, p) => n + p.interest_count, 0);
 
@@ -108,6 +113,23 @@ export function DashboardClient({
     } else {
       toast.error("Couldn't copy the link");
     }
+  }
+
+  /** Friends who open a public plan can "Copy to my Radar", which chains their copy to it. */
+  async function copyChainLink(plan: Plan) {
+    const url = `${window.location.origin}${publicPath}/p/${plan.id}`;
+    if (await copyText(url)) {
+      toast.success("Link copied — send it to a friend", {
+        description: "When they tap “Copy to my Radar”, their plan is chained to yours.",
+      });
+    } else {
+      toast.error("Couldn't copy the link");
+    }
+  }
+
+  function openLeads(plan: Plan) {
+    setLeadsKey((k) => k + 1);
+    setLeadsPlan(plan);
   }
 
   function openNew() {
@@ -183,7 +205,7 @@ export function DashboardClient({
   return (
     <main className="mx-auto w-full max-w-2xl px-4 pt-4 pb-28">
       {/* Header */}
-      <header className="flex items-center justify-between gap-3">
+      <header className="-mx-4 flex items-center justify-between gap-3 border-b px-4 pb-3">
         <Link href="/" className="inline-flex items-center gap-2 text-lg font-bold tracking-tight">
           <RadarIcon className="size-5 text-primary" /> Radar
         </Link>
@@ -203,21 +225,7 @@ export function DashboardClient({
               </span>
             )}
           </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            render={<Link href="/settings" />}
-            nativeButton={false}
-            className="text-muted-foreground"
-            aria-label="Settings"
-          >
-            <Settings />
-          </Button>
-          <form action="/auth/signout" method="post">
-            <Button type="submit" variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Sign out">
-              <LogOut />
-            </Button>
-          </form>
+          <AccountMenu profile={profile} />
         </div>
       </header>
 
@@ -238,10 +246,17 @@ export function DashboardClient({
               <Eye className="size-3" /> View as…
             </button>
           </div>
-          <div className="text-right">
+          <button
+            type="button"
+            onClick={() => setInterestOpen(true)}
+            className="-my-1 -mr-1 rounded-xl px-2 py-1 text-right transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            aria-label={`${totalInterested} interested — see who`}
+          >
             <p className="text-2xl leading-none font-bold tabular-nums">{totalInterested}</p>
-            <p className="text-xs text-muted-foreground">interested</p>
-          </div>
+            <p className="inline-flex items-center gap-0.5 text-xs text-muted-foreground">
+              interested <ChevronRight className="size-3" aria-hidden />
+            </p>
+          </button>
         </div>
         <div className="mt-4 grid grid-cols-3 gap-2">
           <Button onClick={copyBioLink} className="h-auto flex-col gap-1 rounded-xl py-2.5 text-xs">
@@ -330,11 +345,9 @@ export function DashboardClient({
                 onEdit={() => openEdit(plan)}
                 onArchive={() => patchPlan(plan.id, { is_archived: true }, "Archived — hidden from your page")}
                 onDelete={() => deletePlan(plan.id)}
-                onLeads={() => {
-                  setLeadsKey((k) => k + 1);
-                  setLeadsPlan(plan);
-                }}
+                onLeads={() => openLeads(plan)}
                 onCopyLink={() => copyPlanLink(plan)}
+                onChain={() => copyChainLink(plan)}
                 circleNames={circleNames(plan.id)}
               />
             ))}
@@ -344,28 +357,38 @@ export function DashboardClient({
 
       {/* Archived */}
       {archived.length > 0 && (
-        <details className="group mt-8">
-          <summary className="cursor-pointer list-none text-xs font-bold tracking-widest text-muted-foreground uppercase">
-            Archived · {archived.length} <span className="group-open:hidden">(show)</span>
-          </summary>
-          <ul className="mt-3 space-y-2">
-            {archived.map((plan) => (
-              <li key={plan.id} className="flex items-center gap-3 rounded-xl border bg-card/50 px-3 py-2.5">
-                <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">{plan.title}</span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => patchPlan(plan.id, { is_archived: false }, "Restored")}
-                >
-                  <ArchiveRestore /> Restore
-                </Button>
-                <Button size="icon-sm" variant="ghost" onClick={() => deletePlan(plan.id)} aria-label="Delete">
-                  <Trash2 />
-                </Button>
-              </li>
-            ))}
-          </ul>
-        </details>
+        <section className="mt-6 text-center">
+          <button
+            type="button"
+            onClick={() => setShowArchived((v) => !v)}
+            aria-expanded={showArchived}
+            aria-controls="archived-plans"
+            className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <Archive className="size-3.5" />
+            {showArchived ? "Hide archived" : "View archived"} · {archived.length}
+            <ChevronDown className={cn("size-3.5 transition-transform", showArchived && "rotate-180")} />
+          </button>
+          {showArchived && (
+            <ul id="archived-plans" className="mt-3 space-y-2 text-left">
+              {archived.map((plan) => (
+                <li key={plan.id} className="flex items-center gap-3 rounded-xl border bg-card/50 px-3 py-2.5">
+                  <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">{plan.title}</span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => patchPlan(plan.id, { is_archived: false }, "Restored")}
+                  >
+                    <ArchiveRestore /> Restore
+                  </Button>
+                  <Button size="icon-sm" variant="ghost" onClick={() => deletePlan(plan.id)} aria-label={`Delete ${plan.title}`}>
+                    <Trash2 />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       )}
 
       {/* Floating add button (mobile) */}
@@ -402,6 +425,17 @@ export function DashboardClient({
         onCountChange={onCountChange}
         onBlocked={onBlocked}
       />
+      <InterestOverviewDrawer
+        open={interestOpen}
+        onOpenChange={setInterestOpen}
+        plans={active}
+        onOpenPlan={(planId) => {
+          const plan = plans.find((p) => p.id === planId);
+          if (!plan) return;
+          setInterestOpen(false);
+          openLeads(plan);
+        }}
+      />
       <ViewAsDrawer
         open={viewAsOpen}
         onOpenChange={setViewAsOpen}
@@ -424,6 +458,7 @@ type ManagePlanRowProps = {
   onDelete: () => void;
   onLeads: () => void;
   onCopyLink: () => void;
+  onChain: () => void;
   circleNames: string[];
 };
 
@@ -435,9 +470,15 @@ function ManagePlanRow({
   onDelete,
   onLeads,
   onCopyLink,
+  onChain,
   circleNames,
 }: ManagePlanRowProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const isCarpool = plan.category === "Carpool";
+  const when = planWhen(plan);
+  const chained = !!(plan.suggested_by_handle || plan.chained_from_plan_id);
+  // Only public plans can be copied (and so chained) by friends; never rides.
+  const canChain = !chained && plan.visibility === "public" && !isCarpool;
 
   useEffect(() => {
     if (!confirmDelete) return;
@@ -453,12 +494,11 @@ function ManagePlanRow({
           <p className="mt-1 leading-snug font-bold">{plan.title}</p>
           <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
             <CalendarDays className="size-3" />
-            {plan.category === "Carpool" && plan.departs_at && plan.departs_tz
+            {isCarpool && plan.departs_at && plan.departs_tz
               ? `${plan.origin} → ${plan.destination} · ${formatDeparture(plan.departs_at, plan.departs_tz)}`
-              : plan.start_date
-                ? formatDateRange(plan.start_date, plan.end_date)
-                : `${plan.timeframe}${plan.specific_dates ? ` · ${plan.specific_dates}` : ""}`}
-            {plan.dates_flexible && plan.category !== "Carpool" && " · dates flexible"}
+              : `${when.label}${when.rawDates ? ` · ${when.rawDates}` : ""}`}
+            {when.past && " · past"}
+            {plan.dates_flexible && !isCarpool && " · dates flexible"}
           </p>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {plan.visibility === "circles" && (
@@ -473,6 +513,15 @@ function ManagePlanRow({
               </span>
             )}
             <ChainPill plan={plan} />
+            {canChain && (
+              <button
+                type="button"
+                onClick={onChain}
+                className="inline-flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
+              >
+                <Plus className="size-3" /> Chain with a friend
+              </button>
+            )}
           </div>
         </div>
         <button
@@ -486,9 +535,10 @@ function ManagePlanRow({
           )}
           aria-label={
             plan.capacity != null
-              ? `${plan.approved_count} of ${plan.capacity} spots taken, ${plan.pending_count} waiting — view requests`
-              : `${plan.interest_count} interested — view`
+              ? `${plan.approved_count} of ${plan.capacity} spots taken, ${plan.pending_count} waiting — see who`
+              : `${plan.interest_count} interested — see who`
           }
+          title="See who's interested"
         >
           <Users className="size-4" />
           {plan.capacity != null ? (
@@ -522,7 +572,10 @@ function ManagePlanRow({
                 selected ? cn("ring-1 ring-inset", STATUS_STYLES[status].pill) : "text-muted-foreground hover:text-foreground",
               )}
             >
-              {selected && <span className={cn("size-1.5 rounded-full", STATUS_STYLES[status].dot)} />}
+              <span
+                className={cn("size-1.5 rounded-full", STATUS_STYLES[status].dot, !selected && "animate-none opacity-40")}
+                aria-hidden
+              />
               {status}
             </button>
           );
@@ -533,8 +586,8 @@ function ManagePlanRow({
         <Button variant="ghost" size="sm" onClick={onEdit}>
           <Pencil /> Edit
         </Button>
-        <Button variant="ghost" size="sm" onClick={onCopyLink} aria-label="Copy plan link">
-          <Link2 /> Link
+        <Button variant="ghost" size="sm" onClick={onCopyLink} aria-label="Share: copy this plan's link">
+          <Share2 /> Share
         </Button>
         <Button variant="ghost" size="sm" onClick={onArchive}>
           <Archive /> Archive

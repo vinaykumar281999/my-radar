@@ -66,7 +66,7 @@ export function ProfileSettings({ profile }: { profile: Profile }) {
   }
 
   return (
-    <section className="tap-card p-5">
+    <section id="profile" className="tap-card scroll-mt-4 p-5">
       <h2 className="font-bold">Profile</h2>
       <form onSubmit={onSubmit} className="mt-4 space-y-5">
         <UsernameField

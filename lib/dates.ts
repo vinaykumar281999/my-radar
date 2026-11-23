@@ -26,10 +26,16 @@ export function isoFromParts(year: number, monthIndex: number, day: number) {
 const dayFmt = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
 const shortFmt = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 
-/** "Sat, Dec 12" or "Dec 12 – Dec 15". */
+const longFmt = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+
+/** "Sat, Dec 12", "Nov 25–30", "Nov 28 – Dec 2" or "Dec 30, 2026 – Jan 2, 2027". */
 export function formatDateRange(start: string, end?: string | null) {
   if (!end || end === start) return dayFmt.format(toUtcDate(start));
-  return `${shortFmt.format(toUtcDate(start))} – ${shortFmt.format(toUtcDate(end))}`;
+  const a = toUtcDate(start);
+  const b = toUtcDate(end);
+  if (a.getUTCFullYear() !== b.getUTCFullYear()) return `${longFmt.format(a)} – ${longFmt.format(b)}`;
+  if (a.getUTCMonth() === b.getUTCMonth()) return `${shortFmt.format(a)}–${b.getUTCDate()}`;
+  return `${shortFmt.format(a)} – ${shortFmt.format(b)}`;
 }
 
 /** Inclusive list of days a plan covers (capped, for the month grid). */
