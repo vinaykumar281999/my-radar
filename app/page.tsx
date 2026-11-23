@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { BellRing, Link2, Radar as RadarIcon, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { LivePreview } from "@/components/LivePreview";
+import { DemoPhone, DemoStatusSwitch, HeroDemoProvider } from "@/components/demo/HeroDemo";
 import { HandleClaim } from "@/components/landing/HandleClaim";
-import { StatusPill } from "@/components/plan-meta";
 
 export default function LandingPage() {
   return (
@@ -18,6 +17,7 @@ export default function LandingPage() {
       </header>
 
       <main className="flex-1">
+        <HeroDemoProvider>
         <section className="mx-auto grid w-full max-w-6xl grid-cols-1 items-center gap-14 px-5 pt-8 pb-20 lg:grid-cols-[1.1fr_1fr] lg:pt-16">
           <div className="min-w-0 text-center lg:text-left">
             <span className="inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
@@ -36,15 +36,12 @@ export default function LandingPage() {
 
             <HandleClaim className="mx-auto mt-8 lg:mx-0" />
 
-            <div className="mt-6 flex flex-wrap justify-center gap-2 lg:justify-start">
-              <StatusPill status="Just an Idea" />
-              <StatusPill status="Booking Soon" />
-              <StatusPill status="Locked In" />
-            </div>
+            <DemoStatusSwitch className="mt-6 justify-center lg:justify-start" />
           </div>
 
-          <LivePreview />
+          <DemoPhone />
         </section>
+        </HeroDemoProvider>
 
         <section className="border-t bg-muted/30">
           <div className="mx-auto grid w-full max-w-6xl gap-4 px-5 py-16 sm:grid-cols-3">
