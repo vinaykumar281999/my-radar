@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { verifyTurnstile } from "@/lib/turnstile";
-import { PITCH_CATEGORIES, TIMEFRAMES, type Category, type Timeframe } from "@/lib/types";
+import { COMMITMENTS, PITCH_CATEGORIES, TIMEFRAMES, type Category, type Commitment, type Timeframe } from "@/lib/types";
 
 export type SubmitError =
   | "invalid"
@@ -41,6 +41,8 @@ export type InterestInput = Common & {
   name: string;
   contact: string;
   message: string;
+  /** "I'm in" (default) or "Maybe"; guard_interest makes spot and seat requests "in". */
+  commitment?: Commitment;
   /** Carpool seat requests only; guard_interest clears them on other plans. */
   canDrive?: boolean;
   largeBag?: boolean;
@@ -78,6 +80,7 @@ export async function submitInterest(input: InterestInput): Promise<SubmitResult
         contact_handle: contact,
         message,
         user_id: userId,
+        commitment: (COMMITMENTS as readonly string[]).includes(input.commitment ?? "") ? input.commitment : "in",
         can_drive: input.canDrive === true,
         large_bag: input.largeBag === true,
       })

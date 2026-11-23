@@ -112,7 +112,7 @@ export default async function Image({ params }: { params: Promise<{ username: st
               fontWeight: 800,
             }}
           >
-            I&apos;m Interested 👋
+            I&apos;m in 🙌
           </div>
         </div>
       </div>

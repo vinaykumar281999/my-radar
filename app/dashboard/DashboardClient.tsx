@@ -46,7 +46,7 @@ import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { formatDeparture } from "@/lib/dates";
 import { planWhen, sortByWhen } from "@/lib/plan-when";
-import { STATUSES, type BlockResult, type CircleOption, countLeads, type LeadCounts, type JoinNotice, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
+import { STATUSES, commitmentSummary, type BlockResult, type CircleOption, countLeads, type LeadCounts, type JoinNotice, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
 
 type DashboardClientProps = {
   profile: Profile;
@@ -158,10 +158,10 @@ export function DashboardClient({
       return existing
         ? prev.map((p) =>
             p.id === saved.id
-              ? { ...saved, interest_count: p.interest_count, approved_count: p.approved_count, pending_count: p.pending_count }
+              ? { ...saved, interest_count: p.interest_count, maybe_count: p.maybe_count, approved_count: p.approved_count, pending_count: p.pending_count }
               : p,
           )
-        : [{ ...saved, interest_count: 0, approved_count: 0, pending_count: 0 }, ...prev];
+        : [{ ...saved, interest_count: 0, maybe_count: 0, approved_count: 0, pending_count: 0 }, ...prev];
     });
   }
 
@@ -204,6 +204,7 @@ export function DashboardClient({
         return {
           ...p,
           interest_count: Math.max(0, p.interest_count - by.interest_count),
+          maybe_count: Math.max(0, p.maybe_count - by.maybe_count),
           approved_count: Math.max(0, p.approved_count - by.approved_count),
           pending_count: Math.max(0, p.pending_count - by.pending_count),
         };
@@ -543,7 +544,7 @@ function ManagePlanRow({
           aria-label={
             plan.capacity != null
               ? `${plan.approved_count} of ${plan.capacity} spots taken, ${plan.pending_count} waiting — see who`
-              : `${plan.interest_count} interested — see who`
+              : `${commitmentSummary(plan)} — see who's interested`
           }
           title="See who's interested"
         >
@@ -556,7 +557,7 @@ function ManagePlanRow({
               )}
             </span>
           ) : (
-            <span className="tabular-nums">{plan.interest_count}</span>
+            <span className="tabular-nums">{commitmentSummary(plan)}</span>
           )}
         </button>
         <div className="ml-auto flex items-center">

@@ -17,7 +17,7 @@ export async function generateMetadata({ params }: PageProps<"/[username]/p/[pla
   if (!found) return { title: "Plan not available", robots: { index: false, follow: false } };
 
   const { profile, plan } = found;
-  const description = plan.notes ?? `${profile.display_name} is planning this. Tap “I'm Interested” to get in.`;
+  const description = plan.notes ?? `${profile.display_name} is planning this. Tap “I'm in” to join.`;
   return {
     title: `${plan.title} · ${profile.display_name}`,
     description,

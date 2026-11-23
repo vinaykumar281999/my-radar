@@ -157,7 +157,7 @@ export function StoryExportModal({ open, onOpenChange, profile, plans }: StoryEx
             </div>
 
             <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.85 }}>Want in? Tap “I&apos;m Interested” 👋</div>
+              <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.85 }}>Want in? Tap “I&apos;m in” 🙌</div>
               <div
                 style={{
                   marginTop: 8,

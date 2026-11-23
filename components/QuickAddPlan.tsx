@@ -580,7 +580,7 @@ function PlanForm({
             />
             <p className="text-xs text-muted-foreground">
               {form.capacity
-                ? `“I'm Interested” becomes “Request a spot”. You approve up to ${form.capacity}.${
+                ? `“I'm in” becomes “Request a spot”. You approve up to ${form.capacity}.${
                     capacitySource === "circle" ? " (This circle's default.)" : ""
                   }`
                 : "Set a number to approve who gets a spot."}

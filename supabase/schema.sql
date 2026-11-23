@@ -228,6 +228,11 @@ create index if not exists interests_waitlist_idx on public.interests (plan_id, 
 -- interests, so the same rules apply: a requester reads only their own row,
 -- the owner reads everyone's. guard_interest clears them on other plans.
 alter table public.interests add column if not exists can_drive boolean not null default false;
+-- "I'm in" or "Maybe" on plain plans. Spot and carpool requests are always
+-- 'in' (guard_interest). Like everything on interests: owner and requester only.
+alter table public.interests add column if not exists commitment text not null default 'in';
+alter table public.interests drop constraint if exists interests_commitment_check;
+alter table public.interests add constraint interests_commitment_check check (commitment in ('in', 'maybe'));
 alter table public.interests add column if not exists large_bag boolean not null default false;
 
 -- Helpers below are SECURITY DEFINER so RLS policies can use them without
@@ -697,9 +702,9 @@ begin
      where p.id = i.plan_id
        and p.user_id = auth.uid()
        and public.normalize_contact(i.contact_handle) = v_key
-    returning i.id, i.plan_id, i.status
+    returning i.id, i.plan_id, i.status, i.commitment
   )
-  select coalesce(jsonb_agg(jsonb_build_object('id', id, 'plan_id', plan_id, 'status', status)), '[]'::jsonb)
+  select coalesce(jsonb_agg(jsonb_build_object('id', id, 'plan_id', plan_id, 'status', status, 'commitment', commitment)), '[]'::jsonb)
     into v_interests from removed;
 
   return jsonb_build_object('pitch_ids', v_pitches, 'interests', v_interests);
@@ -744,6 +749,11 @@ begin
   -- to that account, so it has to be a real, identifiable person.
   if v_category = 'Carpool' and new.user_id is null then
     raise exception 'sign_in_required' using errcode = 'P0001';
+  end if;
+
+  -- "Maybe" only exists for plain interest: a spot or seat request is a yes.
+  if v_capacity is not null or v_category = 'Carpool' or new.commitment is null then
+    new.commitment := 'in';
   end if;
 
   -- Rider flags only mean something on a carpool; anywhere else they're ignored.

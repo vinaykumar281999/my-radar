@@ -16,7 +16,7 @@ import { CarpoolDetails } from "@/components/CarpoolDetails";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { PROMOTION_DISMISSED_EVENT, isUnseenPromotion } from "@/lib/promotion-notices";
-import type { InterestStatus, Plan, Spots } from "@/lib/types";
+import type { Commitment, InterestStatus, Plan, Spots } from "@/lib/types";
 
 const REQUEST_LABEL: Record<InterestStatus, string> = {
   pending: "Requested · waiting for an answer",
@@ -58,6 +58,7 @@ type PlanCardProps = {
 
 export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots, className }: PlanCardProps) {
   const [open, setOpen] = useState(false);
+  const [commitment, setCommitment] = useState<Commitment>("in");
   // Set right after sending, so the card updates without a reload.
   const [sentStatus, setSentStatus] = useState<InterestStatus | null>(null);
   const viewer = useViewer();
@@ -144,20 +145,40 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
           >
             Sign in to request a seat
           </Button>
-        ) : (
+        ) : hasSpots ? (
           <Button
-            onClick={() => setOpen(true)}
-            variant={hasSpots && left === 0 ? "outline" : "default"}
+            onClick={() => {
+              setCommitment("in");
+              setOpen(true);
+            }}
+            variant={left === 0 ? "outline" : "default"}
             className="h-11 flex-1 rounded-xl text-base font-semibold"
           >
-            {hasSpots
-              ? left === 0
-                ? "Join the waitlist"
-                : isCarpool
-                  ? "Request a seat 🚗"
-                  : "Request a spot ✋"
-              : "I'm Interested 👋"}
+            {left === 0 ? "Join the waitlist" : isCarpool ? "Request a seat 🚗" : "Request a spot ✋"}
           </Button>
+        ) : (
+          // Plain plans: a clear yes, or a softer maybe. Same form either way.
+          <div className="flex flex-1 gap-2">
+            <Button
+              onClick={() => {
+                setCommitment("in");
+                setOpen(true);
+              }}
+              className="h-11 flex-[3] rounded-xl text-base font-semibold"
+            >
+              I&apos;m in 🙌
+            </Button>
+            <Button
+              onClick={() => {
+                setCommitment("maybe");
+                setOpen(true);
+              }}
+              variant="outline"
+              className="h-11 flex-[2] rounded-xl text-base font-semibold"
+            >
+              Maybe 🤔
+            </Button>
+          </div>
         )}
         {canCopy && viewer && hostUsername && (
           <CopyToRadarButton plan={plan} viewerId={viewer.id} hostUsername={hostUsername} />
@@ -188,6 +209,7 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
         demo={demo}
         spotRequest={hasSpots}
         seatWord={seatWord}
+        commitment={commitment}
         onSent={({ waitlisted }) => viewer && setSentStatus(hasSpots ? (waitlisted ? "waitlisted" : "pending") : "interested")}
       />
     </article>
