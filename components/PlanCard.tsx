@@ -13,6 +13,7 @@ import { formatDateRange, formatDeparture } from "@/lib/dates";
 import { canCopyPlan } from "@/lib/audience";
 import { useViewer, useViewerStatus } from "@/components/ViewerContext";
 import { CarpoolDetails } from "@/components/CarpoolDetails";
+import { DatePoll } from "@/components/DatePoll";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { PROMOTION_DISMISSED_EVENT, isUnseenPromotion } from "@/lib/promotion-notices";
@@ -43,6 +44,7 @@ type PlanCardProps = {
         | "destination"
         | "departs_at"
         | "departs_tz"
+        | "poll_closed_at"
       >
     >;
   hostName: string;
@@ -117,6 +119,11 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
         <p className={cn("mt-2 text-sm font-semibold", left === 0 ? "text-muted-foreground" : "text-foreground")}>
           {left === 0 ? "Full" : `${left} of ${spots!.capacity} ${seatWord}s left`}
         </p>
+      )}
+
+      {/* Only "Just an Idea" plans can have an open poll; the database decides the rest. */}
+      {plan.status === "Just an Idea" && !plan.poll_closed_at && !demo && !isCarpool && (
+        <DatePoll planId={plan.id} ownerId={plan.user_id} hostName={hostName} />
       )}
 
       <ChainPill

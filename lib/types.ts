@@ -69,6 +69,9 @@ export type Plan = {
   /** "@handle" or a first name — never a phone number (see publicAttribution). */
   suggested_by_handle: string | null;
   chained_from_plan_id: string | null;
+  /** Date poll: set when the owner picked an option (the poll is then closed). */
+  poll_closed_at: string | null;
+  poll_picked_option_id: string | null;
   created_at: string;
 };
 
@@ -76,6 +79,9 @@ export type PlanWithCount = Plan & {
   interest_count: number;
   /** Plain plans: how many of interest_count said "Maybe". */
   maybe_count: number;
+  /** Date poll: options offered and people who voted (owner only). */
+  poll_option_count: number;
+  poll_vote_count: number;
   /** Plans with spots: approved / waiting for a decision. */
   approved_count: number;
   pending_count: number;

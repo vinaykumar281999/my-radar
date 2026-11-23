@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   Archive,
   ArchiveRestore,
+  CalendarCheck,
   CalendarDays,
   Check,
   Copy,
@@ -38,6 +39,7 @@ import { PromotionNotices } from "@/components/PromotionNotices";
 import { ViewAsDrawer, type ViewAsMember } from "@/components/ViewAsDrawer";
 import { AccountMenu } from "@/components/AccountMenu";
 import { InterestOverviewDrawer } from "@/components/InterestOverviewDrawer";
+import { PollDrawer } from "@/components/PollDrawer";
 import { StoryExportModal } from "@/components/StoryExportModal";
 import { copyText } from "@/components/ShareButton";
 import { useOrigin } from "@/hooks/use-origin";
@@ -82,6 +84,11 @@ export function DashboardClient({
   const [audiences, setAudiences] = useState(initialAudiences);
   const [viewAsOpen, setViewAsOpen] = useState(false);
   const [interestOpen, setInterestOpen] = useState(false);
+  const [pollPlanId, setPollPlanId] = useState<string | null>(null);
+  const pollPlan = plans.find((p) => p.id === pollPlanId) ?? null;
+  const onPollCounts = useCallback((planId: string, c: { options: number; votes: number }) => {
+    setPlans((ps) => ps.map((p) => (p.id === planId ? { ...p, poll_option_count: c.options, poll_vote_count: c.votes } : p)));
+  }, []);
   const [showArchived, setShowArchived] = useState(false);
   const circleNames = (planId: string) =>
     (audiences[planId] ?? []).map((id) => circles.find((c) => c.id === id)?.name).filter(Boolean) as string[];
@@ -158,10 +165,21 @@ export function DashboardClient({
       return existing
         ? prev.map((p) =>
             p.id === saved.id
-              ? { ...saved, interest_count: p.interest_count, maybe_count: p.maybe_count, approved_count: p.approved_count, pending_count: p.pending_count }
+              ? {
+                  ...saved,
+                  interest_count: p.interest_count,
+                  maybe_count: p.maybe_count,
+                  approved_count: p.approved_count,
+                  pending_count: p.pending_count,
+                  poll_option_count: p.poll_option_count,
+                  poll_vote_count: p.poll_vote_count,
+                }
               : p,
           )
-        : [{ ...saved, interest_count: 0, maybe_count: 0, approved_count: 0, pending_count: 0 }, ...prev];
+        : [
+            { ...saved, interest_count: 0, maybe_count: 0, approved_count: 0, pending_count: 0, poll_option_count: 0, poll_vote_count: 0 },
+            ...prev,
+          ];
     });
   }
 
@@ -360,6 +378,7 @@ export function DashboardClient({
                 onLeads={() => openLeads(plan)}
                 onCopyLink={() => copyPlanLink(plan)}
                 onChain={() => copyChainLink(plan)}
+                onPoll={() => setPollPlanId(plan.id)}
                 localToday={localToday}
                 circleNames={circleNames(plan.id)}
               />
@@ -431,6 +450,13 @@ export function DashboardClient({
         onCountChange={onCountChange}
         onBlocked={onBlocked}
       />
+      <PollDrawer
+        plan={pollPlan}
+        onOpenChange={(o) => !o && setPollPlanId(null)}
+        onCounts={onPollCounts}
+        onPicked={(updated) => setPlans((ps) => ps.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)))}
+        onBookingSoon={(planId) => patchPlan(planId, { status: "Booking Soon" }, "Moved to Booking Soon")}
+      />
       <InterestOverviewDrawer
         open={interestOpen}
         onOpenChange={setInterestOpen}
@@ -465,6 +491,7 @@ type ManagePlanRowProps = {
   onLeads: () => void;
   onCopyLink: () => void;
   onChain: () => void;
+  onPoll: () => void;
   circleNames: string[];
   localToday: LocalToday;
 };
@@ -478,6 +505,7 @@ function ManagePlanRow({
   onLeads,
   onCopyLink,
   onChain,
+  onPoll,
   circleNames,
   localToday,
 }: ManagePlanRowProps) {
@@ -488,6 +516,8 @@ function ManagePlanRow({
   const canChain = !chained && plan.visibility === "public" && !isCarpool;
 
   const CategoryIcon = CATEGORY_ICONS[plan.category];
+  // Polls are for plans that are still an idea; once picked, the dates speak for themselves.
+  const canPoll = plan.status === "Just an Idea" && !isCarpool && !plan.poll_closed_at;
 
   return (
     <li className="tap-card flex flex-col p-3">
@@ -518,6 +548,16 @@ function ManagePlanRow({
           <span className="inline-flex items-center gap-1 rounded-full bg-foreground px-1.5 py-px text-[10px] font-semibold text-background">
             <EyeOff className="size-2.5" /> Unlisted
           </span>
+        )}
+        {canPoll && plan.poll_option_count > 0 && (
+          <button
+            type="button"
+            onClick={onPoll}
+            className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-px text-[10px] font-semibold text-primary hover:bg-primary/20"
+          >
+            <CalendarCheck className="size-2.5" />
+            {plan.poll_option_count < 2 ? "Poll · add another date" : `Poll · ${plan.poll_vote_count} voted`}
+          </button>
         )}
         <ChainPill plan={plan} className="px-1.5 py-px text-[10px]" />
         {canChain && (
@@ -567,7 +607,7 @@ function ManagePlanRow({
           <Button variant="ghost" size="sm" onClick={onCopyLink} className="h-7 px-2 text-xs" aria-label="Share: copy this plan's link">
             <Share2 /> Share
           </Button>
-          <PlanMoreMenu title={plan.title} onArchive={onArchive} onDelete={onDelete} />
+          <PlanMoreMenu title={plan.title} onArchive={onArchive} onDelete={onDelete} onPoll={canPoll ? onPoll : undefined} />
         </div>
       </div>
     </li>
@@ -603,7 +643,18 @@ function StatusMenu({ status, onChange }: { status: Status; onChange: (s: Status
 }
 
 /** Less-used actions. Delete needs a second tap, so its item keeps the menu open. */
-function PlanMoreMenu({ title, onArchive, onDelete }: { title: string; onArchive: () => void; onDelete: () => void }) {
+function PlanMoreMenu({
+  title,
+  onArchive,
+  onDelete,
+  onPoll,
+}: {
+  title: string;
+  onArchive: () => void;
+  onDelete: () => void;
+  /** Offered on "Just an Idea" plans: open the date poll. */
+  onPoll?: () => void;
+}) {
   const [confirmDelete, requestDelete] = useTapToConfirm(onDelete);
   return (
     <Menu.Root>
@@ -614,6 +665,11 @@ function PlanMoreMenu({ title, onArchive, onDelete }: { title: string; onArchive
         <Ellipsis className="size-4" />
       </Menu.Trigger>
       <MenuContent>
+        {onPoll && (
+          <Menu.Item className={menuItemClass} onClick={onPoll}>
+            <CalendarCheck /> Date poll
+          </Menu.Item>
+        )}
         <Menu.Item className={menuItemClass} onClick={onArchive}>
           <Archive /> Archive
         </Menu.Item>

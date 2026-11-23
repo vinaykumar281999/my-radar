@@ -16,6 +16,8 @@ export type SubmitError =
   | "plan_unavailable"
   | "plan_full"
   | "sign_in_required"
+  | "poll_closed"
+  | "invalid_options"
   | "server";
 
 /** waitlisted: the plan was full and the request joined its waitlist. */
@@ -101,6 +103,37 @@ export async function submitInterest(input: InterestInput): Promise<SubmitResult
   return result.ok && waitlisted ? { ok: true, waitlisted: true } : result;
 }
 
+export type PollVoteInput = Common & {
+  planId: string;
+  optionIds: string[];
+  name: string;
+  contact: string;
+};
+
+/**
+ * A date-poll vote. Same gate as interest (honeypot, Turnstile, per-IP rate
+ * limit, blocked contacts get a fake success); cast_poll_vote decides who may
+ * vote, with the same missing-plan error for anyone who can't see the plan.
+ */
+export async function submitPollVote(input: PollVoteInput): Promise<SubmitResult> {
+  const planId = uuid(input.planId);
+  const name = text(input.name, 60);
+  const contact = text(input.contact, 60);
+  const optionIds = Array.isArray(input.optionIds) ? input.optionIds.map(uuid).filter((id): id is string => !!id).slice(0, 4) : [];
+  if (!planId || !name || !contact || optionIds.length === 0) return fail("invalid");
+
+  return guarded(input, async (db) => {
+    const userId = await signedInProfileId(db);
+    return db.rpc("cast_poll_vote", {
+      p_plan_id: planId,
+      p_option_ids: optionIds,
+      p_name: name,
+      p_contact: contact,
+      p_user_id: userId,
+    });
+  });
+}
+
 export async function submitPitch(input: PitchInput): Promise<SubmitResult> {
   const targetUserId = uuid(input.targetUserId);
   const title = text(input.title, 80);
@@ -162,7 +195,15 @@ async function guarded(
   // A signed-in user already sent interest for this plan: nothing new to save.
   if (error.code === "23505" && error.message.includes("interests_plan_user_key")) return { ok: true };
 
-  for (const known of ["too_many_pitches", "pitches_paused", "plan_unavailable", "plan_full", "sign_in_required"] as const) {
+  for (const known of [
+    "too_many_pitches",
+    "pitches_paused",
+    "plan_unavailable",
+    "plan_full",
+    "sign_in_required",
+    "poll_closed",
+    "invalid_options",
+  ] as const) {
     if (error.message.includes(known)) return fail(known);
   }
   // Foreign key: the plan or profile doesn't exist (any more).
