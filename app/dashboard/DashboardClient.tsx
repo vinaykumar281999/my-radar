@@ -379,19 +379,12 @@ export function DashboardClient({
           {showArchived && (
             <ul id="archived-plans" className="mt-3 space-y-2 text-left">
               {archived.map((plan) => (
-                <li key={plan.id} className="flex items-center gap-3 rounded-xl border bg-card/50 px-3 py-2.5">
-                  <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">{plan.title}</span>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => patchPlan(plan.id, { is_archived: false }, "Restored")}
-                  >
-                    <ArchiveRestore /> Restore
-                  </Button>
-                  <Button size="icon-sm" variant="ghost" onClick={() => deletePlan(plan.id)} aria-label={`Delete ${plan.title}`}>
-                    <Trash2 />
-                  </Button>
-                </li>
+                <ArchivedPlanRow
+                  key={plan.id}
+                  plan={plan}
+                  onRestore={() => patchPlan(plan.id, { is_archived: false }, "Restored")}
+                  onDelete={() => deletePlan(plan.id)}
+                />
               ))}
             </ul>
           )}
@@ -482,18 +475,12 @@ function ManagePlanRow({
   circleNames,
   localToday,
 }: ManagePlanRowProps) {
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmDelete, requestDelete] = useTapToConfirm(onDelete);
   const isCarpool = plan.category === "Carpool";
   const when = planWhen(plan, localToday.today, localToday.timeZone);
   const chained = !!(plan.suggested_by_handle || plan.chained_from_plan_id);
   // Only public plans can be copied (and so chained) by friends; never rides.
   const canChain = !chained && plan.visibility === "public" && !isCarpool;
-
-  useEffect(() => {
-    if (!confirmDelete) return;
-    const t = setTimeout(() => setConfirmDelete(false), 3000);
-    return () => clearTimeout(t);
-  }, [confirmDelete]);
 
   return (
     <li className="tap-card p-4">
@@ -605,11 +592,48 @@ function ManagePlanRow({
           variant={confirmDelete ? "destructive" : "ghost"}
           size="sm"
           className="ml-auto"
-          onClick={() => (confirmDelete ? onDelete() : setConfirmDelete(true))}
+          onClick={requestDelete}
         >
           <Trash2 /> {confirmDelete ? "Tap to confirm" : "Delete"}
         </Button>
       </div>
+    </li>
+  );
+}
+
+/**
+ * Destructive buttons ask for a second tap: the first arms it (for 3 seconds),
+ * the second runs the action. Returns [armed, onClick].
+ */
+function useTapToConfirm(action: () => void): [boolean, () => void] {
+  const [armed, setArmed] = useState(false);
+
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 3000);
+    return () => clearTimeout(t);
+  }, [armed]);
+
+  return [armed, () => (armed ? action() : setArmed(true))];
+}
+
+function ArchivedPlanRow({ plan, onRestore, onDelete }: { plan: Plan; onRestore: () => void; onDelete: () => void }) {
+  const [confirmDelete, requestDelete] = useTapToConfirm(onDelete);
+
+  return (
+    <li className="flex items-center gap-3 rounded-xl border bg-card/50 px-3 py-2.5">
+      <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">{plan.title}</span>
+      <Button size="sm" variant="ghost" onClick={onRestore}>
+        <ArchiveRestore /> Restore
+      </Button>
+      <Button
+        size="sm"
+        variant={confirmDelete ? "destructive" : "ghost"}
+        onClick={requestDelete}
+        aria-label={confirmDelete ? `Tap again to delete ${plan.title}` : `Delete ${plan.title}`}
+      >
+        <Trash2 /> {confirmDelete && "Tap to confirm"}
+      </Button>
     </li>
   );
 }
