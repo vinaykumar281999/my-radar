@@ -21,6 +21,8 @@ insert into plans (id, user_id, title, category, timeframe, capacity, dates_flex
   values ('f1f1f1f1-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-00000000000a', 'Cabin', 'Trip', 'This Month', 1, true);
 insert into interests (plan_id, visitor_name, contact_handle, user_id) values ('f1f1f1f1-0000-0000-0000-000000000001', 'Bob', '@bob', 'bbbbbbbb-0000-0000-0000-00000000000b');
 insert into interests (plan_id, visitor_name, contact_handle) values ('f1f1f1f1-0000-0000-0000-000000000001', 'Anon', '@anon');
+-- Older databases have the reserved list as an unnamed inline check on profiles.
+alter table profiles add check (username not in ('login', 'logout', 'onboarding', 'dashboard', 'auth', 'api', 'admin', 'settings', 'about', 'help', 'radar', '_next'));
 -- An earlier build kept the notice's seen time on interests itself.
 alter table interests add column promotion_seen_at timestamptz;
 update interests set promoted_at = now() - interval '1 hour', promotion_seen_at = '2026-11-20 10:00+00' where visitor_name = 'Bob';
@@ -51,5 +53,7 @@ check "dates_flexible kept" \
   "select dates_flexible from plans" "t"
 check "old promotion_seen_at moved to promotion_notice_seen (signed-in requests only)" \
   "select string_agg(i.visitor_name || '@' || to_char(s.seen_at at time zone 'UTC', 'HH24:MI'), ',') from promotion_notice_seen s join interests i on i.id = s.interest_id and i.user_id = s.user_id" "Bob@10:00"
+check "old inline reserved-name check replaced by the named one" \
+  "select string_agg(conname, ',') from pg_constraint where conrelid = 'public.profiles'::regclass and contype = 'c' and (pg_get_constraintdef(oid) like '%''dashboard''%' or conname = 'profiles_username_not_reserved')" "profiles_username_not_reserved"
 check "interests.promotion_seen_at dropped" \
   "select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'interests' and column_name = 'promotion_seen_at'" "0"

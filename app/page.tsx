@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { ArrowRight, BellRing, Link2, Radar as RadarIcon, Sparkles } from "lucide-react";
+import { Radar as RadarIcon, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { LivePreview } from "@/components/LivePreview";
-import { StatusPill } from "@/components/plan-meta";
+import { DemoPhone, DemoStatusSwitch, HeroDemoProvider } from "@/components/demo/HeroDemo";
+import { HandleClaim } from "@/components/landing/HandleClaim";
+import { HowItWorks } from "@/components/landing/HowItWorks";
 
 export default function LandingPage() {
   return (
@@ -11,14 +12,21 @@ export default function LandingPage() {
         <Link href="/" className="inline-flex items-center gap-2 text-lg font-bold tracking-tight">
           <RadarIcon className="size-5 text-primary" /> Radar
         </Link>
-        <Button variant="ghost" render={<Link href="/login" />} nativeButton={false}>
-          Sign in
-        </Button>
+        <nav className="flex items-center gap-1">
+          <Button variant="ghost" render={<Link href="/demo" />} nativeButton={false} className="text-muted-foreground">
+            See a live example
+          </Button>
+          <Button variant="ghost" render={<Link href="/login" />} nativeButton={false}>
+            Sign in
+          </Button>
+        </nav>
       </header>
 
       <main className="flex-1">
-        <section className="mx-auto grid w-full max-w-6xl items-center gap-14 px-5 pt-8 pb-20 lg:grid-cols-[1.1fr_1fr] lg:pt-16">
-          <div className="text-center lg:text-left">
+        <HeroDemoProvider>
+        {/* overflow-x-clip: the phone's glow may spill sideways on narrow screens; never scroll for it. */}
+        <section className="mx-auto grid w-full max-w-6xl grid-cols-1 items-center gap-14 overflow-x-clip px-5 pt-8 pb-20 lg:grid-cols-[1.1fr_1fr] lg:pt-16">
+          <div className="min-w-0 text-center lg:text-left">
             <span className="inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
               <Sparkles className="size-3.5 text-primary" /> The link-in-bio for your plans
             </span>
@@ -33,54 +41,16 @@ export default function LandingPage() {
               <strong className="text-foreground">I&apos;m Interested 👋</strong> before the tickets are booked.
             </p>
 
-            <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center lg:justify-start">
-              <Button
-                render={<Link href="/login" />}
-                nativeButton={false}
-                className="h-12 rounded-full px-7 text-base font-semibold shadow-lg shadow-primary/25"
-              >
-                Claim Your Link <ArrowRight />
-              </Button>
-              <span className="text-sm text-muted-foreground">Free · 30-second setup</span>
-            </div>
+            <HandleClaim className="mx-auto mt-8 lg:mx-0" />
 
-            <div className="mt-6 flex flex-wrap justify-center gap-2 lg:justify-start">
-              <StatusPill status="Just an Idea" />
-              <StatusPill status="Booking Soon" />
-              <StatusPill status="Locked In" />
-            </div>
+            <DemoStatusSwitch className="mt-6 justify-center lg:justify-start" />
           </div>
 
-          <LivePreview />
+          <DemoPhone />
         </section>
+        </HeroDemoProvider>
 
-        <section className="border-t bg-muted/30">
-          <div className="mx-auto grid w-full max-w-6xl gap-4 px-5 py-16 sm:grid-cols-3">
-            {[
-              {
-                icon: Link2,
-                title: "One link, every plan",
-                body: "Put radar.app/you in your Instagram bio or WhatsApp status. Update it in seconds.",
-              },
-              {
-                icon: BellRing,
-                title: "Friends raise their hand",
-                body: "No app or login for them — just name, handle, and an optional note.",
-              },
-              {
-                icon: Sparkles,
-                title: "Story-ready cards",
-                body: "Download a 9:16 card of your plans and drop it straight into your Story.",
-              },
-            ].map(({ icon: Icon, title, body }) => (
-              <div key={title} className="tap-card p-5">
-                <Icon className="size-6 text-primary" />
-                <h3 className="mt-3 font-bold">{title}</h3>
-                <p className="mt-1 text-sm text-muted-foreground">{body}</p>
-              </div>
-            ))}
-          </div>
-        </section>
+        <HowItWorks />
       </main>
 
       <footer className="border-t py-6 text-center text-xs text-muted-foreground">

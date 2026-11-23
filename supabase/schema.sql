@@ -12,12 +12,8 @@ create extension if not exists "pgcrypto";
 create table if not exists public.profiles (
   id            uuid primary key references auth.users (id) on delete cascade,
   username      text not null unique
-                  check (username ~ '^[a-z0-9_]{3,30}$')
-                  -- usernames that would collide with app routes
-                  check (username not in (
-                    'login', 'logout', 'onboarding', 'dashboard', 'auth', 'api',
-                    'admin', 'settings', 'about', 'help', 'radar', '_next'
-                  )),
+                  check (username ~ '^[a-z0-9_]{3,30}$'),
+                  -- reserved names: profiles_username_not_reserved, further down
   display_name  text not null check (char_length(display_name) between 1 and 60),
   bio           text check (bio is null or char_length(bio) <= 120),
   avatar_url    text,
@@ -567,7 +563,51 @@ create trigger profiles_guard_username
   before insert or update of username on public.profiles
   for each row execute function public.guard_username();
 
+-- Names that are routes or otherwise off limits. The list must match
+-- RESERVED_USERNAMES in lib/types.ts exactly (tests/unit/reserved-usernames.test.ts
+-- parses both). Enforced on current names and old (history) names alike, so the
+-- app's check can't be skipped by writing to the API directly.
+create or replace function public.is_reserved_username(p_username text)
+returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select lower(p_username) = any (array[
+    'login', 'logout', 'onboarding', 'dashboard', 'auth', 'api',
+    'admin', 'settings', 'about', 'help', 'radar', '_next', 'join', 'demo'
+  ]);
+$$;
+
+-- Older databases have an unnamed inline list on profiles.username (12 names,
+-- without join/demo). Drop it by what it checks, not by its generated name.
+do $$
+declare
+  c record;
+begin
+  for c in
+    select con.conname
+      from pg_constraint con
+     where con.conrelid = 'public.profiles'::regclass
+       and con.contype = 'c'
+       and con.conname <> 'profiles_username_not_reserved'
+       and pg_get_constraintdef(con.oid) like '%''dashboard''%'
+  loop
+    execute format('alter table public.profiles drop constraint %I', c.conname);
+  end loop;
+end;
+$$;
+
+alter table public.profiles drop constraint if exists profiles_username_not_reserved;
+alter table public.profiles add constraint profiles_username_not_reserved
+  check (not public.is_reserved_username(username));
+alter table public.username_history drop constraint if exists username_history_not_reserved;
+alter table public.username_history add constraint username_history_not_reserved
+  check (not public.is_reserved_username(username));
+
 -- Is this username free for the caller? (Their own current/old names count as free.)
+-- Not callable by anon: signed-out checks go through the app's server action,
+-- which rate-limits them per IP (lib/actions/username.ts).
 create or replace function public.username_available(p_username text)
 returns boolean
 language sql
@@ -576,6 +616,7 @@ security definer
 set search_path = ''
 as $$
   select lower(p_username) ~ '^[a-z0-9_]{3,30}$'
+     and not public.is_reserved_username(p_username)
      and not exists (
        select 1 from public.profiles p
         where p.username = lower(p_username) and p.id is distinct from auth.uid()
@@ -600,9 +641,9 @@ as $$
    where h.username = lower(p_username);
 $$;
 
-revoke all on function public.username_available(text) from public;
+revoke all on function public.username_available(text) from public, anon;
 revoke all on function public.resolve_username(text) from public;
-grant execute on function public.username_available(text) to anon, authenticated;
+grant execute on function public.username_available(text) to authenticated, service_role;
 grant execute on function public.resolve_username(text) to anon, authenticated;
 
 -- -----------------------------------------------------------------------------

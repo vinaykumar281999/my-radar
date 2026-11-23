@@ -6,6 +6,7 @@ import { OnboardingForm } from "./OnboardingForm";
 import { Skeleton } from "@/components/ui/skeleton";
 import { requireUser } from "@/lib/data/session";
 import { safeNext } from "@/lib/safe-next";
+import { handleFromQuery } from "@/lib/username";
 
 export const metadata: Metadata = { title: "Claim your username" };
 
@@ -27,7 +28,7 @@ export default function OnboardingPage({ searchParams }: PageProps<"/onboarding"
 }
 
 async function OnboardingGate({ searchParams }: { searchParams: PageProps<"/onboarding">["searchParams"] }) {
-  const rawNext = (await searchParams).next;
+  const { next: rawNext, handle } = await searchParams;
   const next = safeNext(typeof rawNext === "string" ? rawNext : null);
   const { user, profile } = await requireUser();
   if (profile) redirect(next);
@@ -35,5 +36,7 @@ async function OnboardingGate({ searchParams }: { searchParams: PageProps<"/onbo
   const emailLocal = (user.email ?? "").split("@")[0] ?? "";
   const suggested = emailLocal.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 30);
 
-  return <OnboardingForm userId={user.id} suggestedUsername={suggested} next={next} />;
+  // A handle picked on the landing page wins over the email-based suggestion,
+  // but only if it's still a valid name (the form then checks availability).
+  return <OnboardingForm userId={user.id} suggestedUsername={handleFromQuery(handle) ?? suggested} next={next} />;
 }

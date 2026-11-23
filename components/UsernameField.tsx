@@ -4,26 +4,27 @@ import { useEffect, useState } from "react";
 import { Check, Loader2, X } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { useHost } from "@/hooks/use-origin";
-import { createClient } from "@/lib/supabase/client";
-import { RESERVED_USERNAMES, USERNAME_RE } from "@/lib/types";
+import { checkUsernameAvailable } from "@/lib/actions/username";
+import { RESERVED_USERNAMES } from "@/lib/types";
+import { cleanUsername, isValidUsername } from "@/lib/username";
 
-export type Availability = "idle" | "current" | "checking" | "available" | "taken" | "invalid";
+export { cleanUsername };
 
-/** Lowercase, allowed characters only, max 30. */
-export function cleanUsername(raw: string) {
-  return raw.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 30);
-}
+/** "limited": too many signed-out checks from this network; never blocks submitting (the database decides). */
+export type Availability = "idle" | "current" | "checking" | "available" | "taken" | "invalid" | "limited";
 
 /**
  * Debounced availability check. Old usernames are reserved for their original
- * owner, so this asks the database (username_available) rather than reading
- * profiles directly. `current` is the caller's existing username, if any.
+ * owner, so this asks the database (username_available, through the
+ * checkUsernameAvailable server action, which rate-limits signed-out checks)
+ * rather than reading profiles directly. `current` is the caller's existing
+ * username, if any.
  */
-export function useUsernameAvailability(username: string, current?: string) {
+export function useUsernameAvailability(username: string, current?: string, delayMs = 350) {
   // Result of the last async lookup, keyed by the username it was for.
-  const [lookup, setLookup] = useState<{ username: string; result: "available" | "taken" | "idle" } | null>(null);
+  const [lookup, setLookup] = useState<{ username: string; result: "available" | "taken" | "limited" | "idle" } | null>(null);
 
-  const isValid = USERNAME_RE.test(username) && !RESERVED_USERNAMES.has(username);
+  const isValid = isValidUsername(username);
   const isCurrent = !!current && username === current;
 
   const availability: Availability = !username
@@ -40,15 +41,24 @@ export function useUsernameAvailability(username: string, current?: string) {
     if (!isValid || isCurrent) return;
     let cancelled = false;
     const t = setTimeout(async () => {
-      const { data, error } = await createClient().rpc("username_available", { p_username: username });
+      const result = await checkUsernameAvailable(username);
       if (cancelled) return;
-      setLookup({ username, result: error ? "idle" : data ? "available" : "taken" });
-    }, 350);
+      setLookup({
+        username,
+        result:
+          result === "available" || result === "taken"
+            ? result
+            : result === "rate_limited"
+              ? "limited"
+              : // "invalid" can't happen here (checked above); "error" just means "don't know".
+                "idle",
+      });
+    }, delayMs);
     return () => {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [username, isValid, isCurrent]);
+  }, [username, isValid, isCurrent, delayMs]);
 
   return {
     availability,
@@ -97,6 +107,8 @@ export function UsernameField({
             : "3–30 characters: lowercase letters, numbers, underscores."
           : availability === "taken"
             ? "Already taken — try another."
+            : availability === "limited"
+              ? "Too many checks from your network. Try again in a minute."
             : availability === "available"
               ? (hint ?? "Nice, it's yours!")
               : availability === "current"
