@@ -11,9 +11,14 @@ export default function LandingPage() {
         <Link href="/" className="inline-flex items-center gap-2 text-lg font-bold tracking-tight">
           <RadarIcon className="size-5 text-primary" /> Radar
         </Link>
-        <Button variant="ghost" render={<Link href="/login" />} nativeButton={false}>
-          Sign in
-        </Button>
+        <nav className="flex items-center gap-1">
+          <Button variant="ghost" render={<Link href="/demo" />} nativeButton={false} className="text-muted-foreground">
+            See a live example
+          </Button>
+          <Button variant="ghost" render={<Link href="/login" />} nativeButton={false}>
+            Sign in
+          </Button>
+        </nav>
       </header>
 
       <main className="flex-1">

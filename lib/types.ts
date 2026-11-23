@@ -259,7 +259,7 @@ export const USERNAME_RE = /^[a-z0-9_]{3,30}$/;
 
 export const RESERVED_USERNAMES = new Set([
   "login", "logout", "onboarding", "dashboard", "auth", "api",
-  "admin", "settings", "about", "help", "radar", "_next", "join",
+  "admin", "settings", "about", "help", "radar", "_next", "join", "demo",
 ]);
 
 type Sortable = Pick<Plan, "timeframe" | "created_at"> & Partial<Pick<Plan, "start_date">>;

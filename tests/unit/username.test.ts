@@ -11,6 +11,7 @@ test("valid means the right shape and not a reserved route", () => {
   assert.equal(isValidUsername("maya_chen"), true);
   assert.equal(isValidUsername("ab"), false);
   assert.equal(isValidUsername("dashboard"), false);
+  assert.equal(isValidUsername("demo"), false, "the demo page lives at /demo");
 });
 
 test("Claim carries the handle through sign-in to onboarding", () => {
