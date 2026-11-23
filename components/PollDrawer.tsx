@@ -1,19 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { CalendarCheck, CalendarPlus, Check, Loader2, Trophy, X } from "lucide-react";
+import { CalendarCheck, CalendarPlus, Check, Loader2, Trash2, Trophy, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ContactChip } from "@/components/ContactChip";
+import { useTapToConfirm } from "@/hooks/use-tap-to-confirm";
 import { createClient } from "@/lib/supabase/client";
 import {
   POLL_MAX_OPTIONS,
   POLL_MIN_OPTIONS,
   newOptionProblem,
   optionLabel,
+  countingBallots,
+  sortOptions,
   tallyBallots,
   votesLabel,
   type PollBallot,
@@ -22,9 +26,11 @@ import {
 import type { Plan } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-async function fetchPoll(id: string): Promise<{ options: PollOption[]; ballots: PollBallot[] }> {
+type PollData = { options: PollOption[]; ballots: PollBallot[]; stale: Set<string> };
+
+async function fetchPoll(id: string): Promise<PollData> {
   const supabase = createClient();
-  const [{ data: options, error: oErr }, { data: ballots, error: bErr }] = await Promise.all([
+  const [{ data: options, error: oErr }, { data: ballots, error: bErr }, { data: stale, error: sErr }] = await Promise.all([
     supabase
       .from("plan_date_options")
       .select("id, plan_id, start_date, end_date")
@@ -35,20 +41,22 @@ async function fetchPoll(id: string): Promise<{ options: PollOption[]; ballots: 
       .select("id, voter_name, voter_contact, user_id, created_at, plan_poll_choices(option_id)")
       .eq("plan_id", id)
       .order("created_at")
-      .returns<BallotRow[]>(),
+      .returns<BallotDbRow[]>(),
+    // Ballots from people who can no longer see the plan (owner only).
+    supabase.rpc("poll_stale_ballots", { p_plan_id: id }),
   ]);
-  if (oErr || bErr) {
-    console.error("poll load", oErr ?? bErr);
+  if (oErr || bErr || sErr) {
+    console.error("poll load", oErr ?? bErr ?? sErr);
     toast.error("Couldn't load the poll");
   }
   const parsed = (ballots ?? []).map(({ plan_poll_choices, ...b }) => ({
     ...b,
     option_ids: plan_poll_choices.map((c) => c.option_id),
   }));
-  return { options: options ?? [], ballots: parsed };
+  return { options: options ?? [], ballots: parsed, stale: new Set((stale as string[] | null) ?? []) };
 }
 
-type BallotRow = Omit<PollBallot, "option_ids"> & {
+type BallotDbRow = Omit<PollBallot, "option_ids"> & {
   plan_poll_choices: { option_id: string }[];
 };
 
@@ -78,11 +86,7 @@ export function PollDrawer({
   onBookingSoon: (planId: string) => void;
 }) {
   const planId = plan?.id;
-  const [data, setData] = useState<{
-    planId: string;
-    options: PollOption[];
-    ballots: PollBallot[];
-  } | null>(null);
+  const [data, setData] = useState<(PollData & { planId: string }) | null>(null);
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [busy, setBusy] = useState(false);
@@ -91,11 +95,11 @@ export function PollDrawer({
   const closed = !!plan?.poll_closed_at;
 
   const apply = useCallback(
-    (id: string, loaded: { options: PollOption[]; ballots: PollBallot[] }) => {
+    (id: string, loaded: PollData) => {
       setData({ planId: id, ...loaded });
       onCounts(id, {
         options: loaded.options.length,
-        votes: loaded.ballots.length,
+        votes: countingBallots(loaded.ballots, loaded.stale),
       });
     },
     [onCounts],
@@ -114,7 +118,19 @@ export function PollDrawer({
   }, [planId, apply]);
 
   const problem = current ? newOptionProblem(current.options, start, end) : null;
-  const rows = current ? tallyBallots(current.options, current.ballots) : [];
+  const rows = current ? tallyBallots(current.options, current.ballots, current.stale) : [];
+  const counting = current ? countingBallots(current.ballots, current.stale) : 0;
+
+  async function removeBallot(id: string) {
+    if (!plan) return;
+    const { error } = await createClient().from("plan_poll_ballots").delete().eq("id", id);
+    if (error) {
+      toast.error("Couldn't remove that vote");
+      return;
+    }
+    toast.success("Vote removed");
+    await load(plan.id);
+  }
 
   async function addOption(e: React.FormEvent) {
     e.preventDefault();
@@ -173,7 +189,7 @@ export function PollDrawer({
           </DrawerTitle>
           <DrawerDescription className="text-left">
             {plan?.title}
-            {current && ` · ${current.ballots.length} ${current.ballots.length === 1 ? "person" : "people"} voted`}
+            {current && ` · ${counting} ${counting === 1 ? "person" : "people"} voted`}
           </DrawerDescription>
         </DrawerHeader>
 
@@ -250,7 +266,16 @@ export function PollDrawer({
                             </button>
                           )}
                         </div>
-                        {voters.length > 0 && <p className="mt-1 text-xs text-muted-foreground">{voters.join(", ")}</p>}
+                        {voters.length > 0 && (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {voters.map((v, i) => (
+                              <span key={`${v.name}-${i}`} className={cn(v.stale && "line-through decoration-muted-foreground/50")}>
+                                {i > 0 && ", "}
+                                {v.name}
+                              </span>
+                            ))}
+                          </p>
+                        )}
                         {!closed && current.options.length >= POLL_MIN_OPTIONS && (
                           <Button
                             size="sm"
@@ -309,10 +334,67 @@ export function PollDrawer({
                   )}
                 </form>
               )}
+
+              {current.ballots.length > 0 && (
+                <section aria-label="Who voted">
+                  <h3 className="text-xs font-bold tracking-widest text-muted-foreground uppercase">Who voted</h3>
+                  <ul className="mt-2 divide-y rounded-xl border">
+                    {current.ballots.map((b) => (
+                      <BallotRow
+                        key={b.id}
+                        ballot={b}
+                        stale={current.stale.has(b.id)}
+                        labels={sortOptions(current.options.filter((o) => b.option_ids.includes(o.id))).map(optionLabel)}
+                        onRemove={() => removeBallot(b.id)}
+                      />
+                    ))}
+                  </ul>
+                </section>
+              )}
             </>
           )}
         </div>
       </DrawerContent>
     </Drawer>
+  );
+}
+
+/** One voter, for the owner. Removing needs a second tap. */
+function BallotRow({
+  ballot,
+  stale,
+  labels,
+  onRemove,
+}: {
+  ballot: PollBallot;
+  stale: boolean;
+  labels: string[];
+  onRemove: () => void;
+}) {
+  const [armed, requestRemove] = useTapToConfirm(onRemove);
+  return (
+    <li className="flex items-start gap-2 px-3 py-2.5">
+      <div className="min-w-0 flex-1">
+        <p className={cn("flex flex-wrap items-center gap-1.5 text-sm font-semibold", stale && "text-muted-foreground")}>
+          {ballot.voter_name}
+          <ContactChip contact={ballot.voter_contact} />
+          {stale && (
+            <span className="rounded-full bg-muted px-1.5 py-px text-[10px] font-bold tracking-wide text-muted-foreground uppercase">
+              No longer in this circle · not counted
+            </span>
+          )}
+        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{labels.join(", ") || "No dates left"}</p>
+      </div>
+      <Button
+        size="sm"
+        variant={armed ? "destructive" : "ghost"}
+        onClick={requestRemove}
+        className="h-8 shrink-0"
+        aria-label={armed ? `Tap again to remove ${ballot.voter_name}'s vote` : `Remove ${ballot.voter_name}'s vote`}
+      >
+        <Trash2 /> {armed ? "Tap to confirm" : "Remove"}
+      </Button>
+    </li>
   );
 }

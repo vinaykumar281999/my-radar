@@ -61,18 +61,27 @@ export function newOptionProblem(
   return null;
 }
 
-/** Per option, for the owner: votes and who voted, plus which options lead. */
-export function tallyBallots(options: PollOption[], ballots: PollBallot[]) {
+/**
+ * Per option, for the owner: votes and who voted, plus which options lead.
+ * Ballots in `stale` (voter can no longer see the plan) are listed but don't
+ * count, matching what everyone else sees through plan_poll().
+ */
+export function tallyBallots(options: PollOption[], ballots: PollBallot[], stale: ReadonlySet<string> = new Set()) {
   const rows = sortOptions(options).map((o) => {
     const voters = ballots.filter((b) => b.option_ids.includes(o.id));
     return {
       option: o,
-      votes: voters.length,
-      voters: voters.map((b) => b.voter_name),
+      votes: voters.filter((b) => !stale.has(b.id)).length,
+      voters: voters.map((b) => ({ name: b.voter_name, stale: stale.has(b.id) })),
     };
   });
   const top = Math.max(0, ...rows.map((r) => r.votes));
   return rows.map((r) => ({ ...r, leading: top > 0 && r.votes === top }));
+}
+
+/** Voters whose ballot still counts. */
+export function countingBallots(ballots: PollBallot[], stale: ReadonlySet<string>) {
+  return ballots.filter((b) => !stale.has(b.id)).length;
 }
 
 /** The poll is open to voters: enough options and not decided yet. */

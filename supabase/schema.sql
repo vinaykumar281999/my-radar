@@ -1905,6 +1905,8 @@ create trigger plan_date_options_guard
 
 -- Counts per option for open polls (2+ options) on plans the caller can see.
 -- No names, no ballots: the same answer anyone who can open the plan gets.
+-- Only votes from people who can still see the plan count (someone removed
+-- from the circle drops out); the owner still sees those ballots, marked.
 create or replace function public.plan_poll(p_plan_ids uuid[])
 returns table (plan_id uuid, option_id uuid, start_date date, end_date date, votes int)
 language sql
@@ -1913,7 +1915,11 @@ security definer
 set search_path = ''
 as $$
   select o.plan_id, o.id, o.start_date, o.end_date,
-         (select count(*)::int from public.plan_poll_choices c where c.option_id = o.id)
+         (select count(*)::int
+            from public.plan_poll_choices c
+            join public.plan_poll_ballots b on b.id = c.ballot_id
+           where c.option_id = o.id
+             and public.can_user_see_plan(o.plan_id, b.user_id))
     from public.plan_date_options o
     join public.plans p on p.id = o.plan_id
    where o.plan_id = any (p_plan_ids)
@@ -1926,6 +1932,28 @@ $$;
 
 revoke all on function public.plan_poll(uuid[]) from public;
 grant execute on function public.plan_poll(uuid[]) to anon, authenticated;
+
+-- For the owner's poll view: ballots whose voter can no longer see the plan
+-- (e.g. removed from its circle). They don't count publicly. Anyone but the
+-- owner gets nothing back.
+create or replace function public.poll_stale_ballots(p_plan_id uuid)
+returns setof uuid
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select b.id
+    from public.plan_poll_ballots b
+    join public.plans p on p.id = b.plan_id
+   where b.plan_id = p_plan_id
+     and auth.uid() is not null
+     and p.user_id = auth.uid()
+     and not public.can_user_see_plan(p_plan_id, b.user_id);
+$$;
+
+revoke all on function public.poll_stale_ballots(uuid) from public, anon;
+grant execute on function public.poll_stale_ballots(uuid) to authenticated;
 
 -- A vote, cast by the app's server action after Turnstile and the per-IP rate
 -- limit (service_role only). p_user_id comes from the voter's session.

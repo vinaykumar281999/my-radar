@@ -128,13 +128,49 @@ reset role;
 set role authenticated; select t.as_user(:F);
 select t.eq((select count(*) from plan_poll(array['f2f2f2f2-0000-0000-0000-000000000002']::uuid[])), 0::bigint, 'an outsider gets nothing for a circle plan');
 reset role;
+set role service_role;
+select cast_poll_vote(:PC, array[:OC1, :OC2]::uuid[], 'Bob', '@bob', :B);
+reset role;
 set role authenticated; select t.as_user(:B);
-select t.eq((select string_agg(votes::text, ',' order by start_date) from plan_poll(array['f2f2f2f2-0000-0000-0000-000000000002']::uuid[])), '1,0', 'a member sees the circle plan''s counts');
+select t.eq((select string_agg(votes::text, ',' order by start_date) from plan_poll(array['f2f2f2f2-0000-0000-0000-000000000002']::uuid[])), '2,1', 'a member sees the circle plan''s counts');
+reset role;
+set role authenticated; select t.as_user(:A);
+select t.eq((select count(*) from poll_stale_ballots(:PC)), 0::bigint, 'while everyone is still in the circle, no ballot is stale');
 reset role;
 delete from circle_members where circle_id = :COLLEGE and user_id = :B;
 set role authenticated; select t.as_user(:B);
 select t.eq((select count(*) from plan_poll(array['f2f2f2f2-0000-0000-0000-000000000002']::uuid[])), 0::bigint, 'removed from the circle: no counts');
 reset role;
+
+-- ===== A removed member's vote stops counting; the owner still sees it, marked =====
+set role authenticated; select t.as_user(:C);
+select t.eq((select string_agg(votes::text, ',' order by start_date) from plan_poll(array['f2f2f2f2-0000-0000-0000-000000000002']::uuid[])), '1,0',
+  'Bob''s vote no longer counts for the members who are left');
+select t.eq((select count(*) from poll_stale_ballots(:PC)), 0::bigint, 'only the owner can ask which ballots are stale');
+reset role;
+set role authenticated; select t.as_user(:A);
+select t.eq((select string_agg(voter_name, ',' order by voter_name) from plan_poll_ballots where plan_id = :PC), 'Bob,Carol', 'the owner still sees Bob''s ballot');
+select t.eq((select string_agg(b.voter_name, ',') from poll_stale_ballots(:PC) s join plan_poll_ballots b on b.id = s), 'Bob', '...marked as no longer able to see the plan');
+reset role;
+set role anon; select t.as_user(null);
+select t.throws($$select * from poll_stale_ballots('f2f2f2f2-0000-0000-0000-000000000002')$$, 'permission denied', 'anon can''t call poll_stale_ballots');
+reset role;
+
+-- ===== Removing a ballot: the owner only =====
+set role authenticated; select t.as_user(:C);
+delete from plan_poll_ballots where plan_id = :PC;  -- RLS: Carol may not delete, not even her own
+reset role;
+select t.eq((select count(*) from plan_poll_ballots where plan_id = :PC), 2::bigint, 'a voter can''t remove ballots (not even their own)');
+set role authenticated; select t.as_user(:F);
+delete from plan_poll_ballots where plan_id = :PC;
+reset role;
+select t.eq((select count(*) from plan_poll_ballots where plan_id = :PC), 2::bigint, 'an outsider can''t remove ballots');
+set role authenticated; select t.as_user(:A);
+delete from plan_poll_ballots where plan_id = :PC and voter_name = 'Bob';
+select t.eq((select string_agg(voter_name, ',') from plan_poll_ballots where plan_id = :PC), 'Carol', 'the owner removes Bob''s ballot');
+reset role;
+select t.eq((select count(*) from plan_poll_choices c where not exists (select 1 from plan_poll_ballots b where b.id = c.ballot_id)), 0::bigint,
+  '...and his choices go with it');
 set role service_role;
 select t.throws($$select cast_poll_vote('f2f2f2f2-0000-0000-0000-000000000002', array['02000000-0000-0000-0000-000000000001']::uuid[], 'Bob', '@bob', 'bbbbbbbb-0000-0000-0000-00000000000b')$$,
   'plan_unavailable', '...and can''t vote any more');

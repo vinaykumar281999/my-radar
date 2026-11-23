@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import {
   Archive,
@@ -45,6 +45,7 @@ import { StoryExportModal } from "@/components/StoryExportModal";
 import { copyText } from "@/components/ShareButton";
 import { useOrigin } from "@/hooks/use-origin";
 import { useLocalToday, type LocalToday } from "@/hooks/use-local-today";
+import { useTapToConfirm } from "@/hooks/use-tap-to-confirm";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { formatDeparture } from "@/lib/dates";
@@ -686,22 +687,6 @@ function PlanMoreMenu({
       </MenuContent>
     </Menu.Root>
   );
-}
-
-/**
- * Destructive buttons ask for a second tap: the first arms it (for 3 seconds),
- * the second runs the action. Returns [armed, onClick].
- */
-function useTapToConfirm(action: () => void): [boolean, () => void] {
-  const [armed, setArmed] = useState(false);
-
-  useEffect(() => {
-    if (!armed) return;
-    const t = setTimeout(() => setArmed(false), 3000);
-    return () => clearTimeout(t);
-  }, [armed]);
-
-  return [armed, () => (armed ? action() : setArmed(true))];
 }
 
 function ArchivedPlanRow({ plan, onRestore, onDelete }: { plan: Plan; onRestore: () => void; onDelete: () => void }) {

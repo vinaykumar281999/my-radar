@@ -89,6 +89,7 @@ const rpcDenied = [
   ["my_waitlist_position", { p_plan_id: ZERO }],
   ["cast_poll_vote", { p_plan_id: ZERO, p_option_ids: [ZERO], p_name: "x", p_contact: "@x", p_user_id: null }],
   ["pick_date_option", { p_option_id: ZERO }],
+  ["poll_stale_ballots", { p_plan_id: ZERO }],
   ["my_promotion_notices", {}],
   ["dismiss_promotion_notice", { p_interest_id: ZERO }],
 ];

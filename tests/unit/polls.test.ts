@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { newOptionProblem, optionLabel, pollIsOpen, sortOptions, tallyBallots, votesLabel, type PollBallot, type PollOption } from "@/lib/polls";
+import { countingBallots, newOptionProblem, optionLabel, pollIsOpen, sortOptions, tallyBallots, votesLabel, type PollBallot, type PollOption } from "@/lib/polls";
 
 const opt = (id: string, start_date: string, end_date: string | null = null): PollOption => ({ id, plan_id: "p", start_date, end_date });
 const ballot = (voter_name: string, option_ids: string[]): PollBallot => ({
@@ -27,7 +27,7 @@ test("adding options: up to 4, sensible ranges, no duplicates", () => {
 test("the owner's tally counts each ballot once per option and marks the leaders", () => {
   const options = [opt("a", "2026-12-11"), opt("b", "2026-12-18"), opt("c", "2027-01-02")];
   const rows = tallyBallots(options, [ballot("Ann", ["a", "b"]), ballot("Bob", ["b"]), ballot("Cy", ["b", "c"])]);
-  assert.deepEqual(rows.map((r) => [r.option.id, r.votes, r.voters.join("+"), r.leading]), [
+  assert.deepEqual(rows.map((r) => [r.option.id, r.votes, r.voters.map((v) => v.name).join("+"), r.leading]), [
     ["a", 1, "Ann", false],
     ["b", 3, "Ann+Bob+Cy", true],
     ["c", 1, "Cy", false],
@@ -41,4 +41,14 @@ test("a poll is open with 2+ options until something is picked", () => {
   assert.equal(pollIsOpen(4, "2026-11-23T10:00:00Z"), false);
   assert.equal(votesLabel(1), "1 vote");
   assert.equal(votesLabel(0), "0 votes");
+});
+
+test("ballots from people who can no longer see the plan are listed but don't count", () => {
+  const options = [opt("a", "2026-12-11"), opt("b", "2026-12-18")];
+  const ballots = [ballot("Ann", ["a"]), ballot("Bob", ["b"]), ballot("Cy", ["b"])];
+  const stale = new Set(["Bob", "Cy"]); // ballot ids (= names in this fixture)
+  const rows = tallyBallots(options, ballots, stale);
+  assert.deepEqual(rows.map((r) => [r.option.id, r.votes, r.leading]), [["a", 1, true], ["b", 0, false]], "b would lead with them; it doesn't");
+  assert.deepEqual(rows[1].voters, [{ name: "Bob", stale: true }, { name: "Cy", stale: true }], "the owner still sees who they were");
+  assert.equal(countingBallots(ballots, stale), 1);
 });
