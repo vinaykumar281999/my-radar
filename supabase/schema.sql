@@ -606,6 +606,8 @@ alter table public.username_history add constraint username_history_not_reserved
   check (not public.is_reserved_username(username));
 
 -- Is this username free for the caller? (Their own current/old names count as free.)
+-- Not callable by anon: signed-out checks go through the app's server action,
+-- which rate-limits them per IP (lib/actions/username.ts).
 create or replace function public.username_available(p_username text)
 returns boolean
 language sql
@@ -639,9 +641,9 @@ as $$
    where h.username = lower(p_username);
 $$;
 
-revoke all on function public.username_available(text) from public;
+revoke all on function public.username_available(text) from public, anon;
 revoke all on function public.resolve_username(text) from public;
-grant execute on function public.username_available(text) to anon, authenticated;
+grant execute on function public.username_available(text) to authenticated, service_role;
 grant execute on function public.resolve_username(text) to anon, authenticated;
 
 -- -----------------------------------------------------------------------------

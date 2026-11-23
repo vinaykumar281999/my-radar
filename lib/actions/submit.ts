@@ -1,9 +1,8 @@
 "use server";
 
-import { createHmac } from "node:crypto";
-import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { clientIp, hashIp } from "@/lib/request-ip";
 import { verifyTurnstile } from "@/lib/turnstile";
 import { PITCH_CATEGORIES, TIMEFRAMES, type Category, type Timeframe } from "@/lib/types";
 
@@ -180,16 +179,6 @@ async function signedInProfileId(db: ReturnType<typeof createAdminClient>) {
 
 function fail(error: SubmitError): SubmitResult {
   return { ok: false, error };
-}
-
-async function clientIp() {
-  const h = await headers();
-  return h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || null;
-}
-
-/** Store a keyed hash, never the raw IP. */
-function hashIp(ip: string) {
-  return createHmac("sha256", process.env.SUPABASE_SERVICE_ROLE_KEY ?? "radar").update(ip).digest("base64url").slice(0, 32);
 }
 
 function text(value: unknown, max: number) {

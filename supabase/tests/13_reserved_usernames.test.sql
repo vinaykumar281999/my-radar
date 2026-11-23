@@ -1,4 +1,6 @@
--- Reserved usernames are enforced by the database, not just the app.
+-- Reserved usernames are enforced by the database, not just the app, and
+-- username_available is no longer callable by anon (the app's server action
+-- rate-limits signed-out checks and calls it as service_role).
 \set ON_ERROR_STOP 1
 select t.make_user('aaaaaaaa-0000-0000-0000-000000000001', 'alice');
 
@@ -44,4 +46,15 @@ select t.eq(username_available('demo'), false, 'demo is not available');
 select t.eq(username_available('Join'), false, 'reserved, any case');
 select t.eq(username_available('demo_fan'), true, 'a similar free name is available');
 select t.eq(username_available('alice'), true, 'your own current name still counts as yours');
+reset role;
+
+-- ===== Who can call what =====
+set role anon; select t.as_user(null);
+select t.throws($$select username_available('anything')$$, 'permission denied', 'anon can''t call username_available directly');
+select t.eq(resolve_username('nobody_here'), null::text, 'anon can still resolve old names (proxy.ts needs it)');
+select t.eq(is_reserved_username('demo'), true, 'is_reserved_username stays callable (constraints run as the inserting user)');
+reset role;
+set role service_role;
+select t.eq(username_available('demo_fan'), true, 'the app''s server action (service_role) can check availability');
+select t.eq(username_available('alice'), false, '...and, with no user, someone else''s name is taken');
 reset role;

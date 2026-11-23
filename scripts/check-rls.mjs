@@ -88,8 +88,9 @@ for (const [fn, args] of rpcDenied) {
 }
 
 // --- Functions anon may call -------------------------------------------------------
+// Signed-out availability checks go through the app's rate-limited server action instead.
 r = await sb.rpc("username_available", { p_username: "zz_rls_check_zz" });
-check("username_available works for anon", !r.error && r.data === true, describe(r));
+check("username_available exists, anon cannot execute", denied(r), describe(r));
 // Callable by anyone on purpose (check constraints run it as the inserting user); it only reveals the public list.
 r = await sb.rpc("is_reserved_username", { p_username: "demo" });
 check("is_reserved_username exists and says demo is reserved", !r.error && r.data === true, describe(r));

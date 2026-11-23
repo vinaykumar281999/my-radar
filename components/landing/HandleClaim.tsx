@@ -81,6 +81,9 @@ function ClaimStatus({ handle, availability }: { handle: string; availability: R
       );
     case "taken":
       return <span className="font-medium text-destructive">taken</span>;
+    case "limited":
+      // Claim still works: availability is checked again during sign-up.
+      return <span className="text-muted-foreground">Too many checks. Try again in a minute, or just claim it.</span>;
     case "invalid":
       return (
         <span className="text-destructive">
