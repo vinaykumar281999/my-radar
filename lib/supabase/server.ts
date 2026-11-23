@@ -1,6 +1,7 @@
 import "server-only";
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createPlainClient } from "@supabase/supabase-js";
+import { io } from "next/cache";
 import { cookies } from "next/headers";
 import { SUPABASE_ANON_KEY, SUPABASE_URL, assertSupabaseEnv } from "./env";
 
@@ -8,6 +9,11 @@ import { SUPABASE_ANON_KEY, SUPABASE_URL, assertSupabaseEnv } from "./env";
 export async function createClient() {
   // Read cookies first so the route is marked dynamic before any env check runs.
   const cookieStore = await cookies();
+  // The auth client checks token expiry against Date.now(). With Partial
+  // Prefetching, Next can prerender with the request's cookies, and would then
+  // reach that clock read; io() keeps everything signed-in out of prerenders
+  // (it resolves immediately on real requests, in route handlers and actions).
+  await io();
   assertSupabaseEnv();
 
   return createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
