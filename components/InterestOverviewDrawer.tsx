@@ -6,7 +6,7 @@ import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } f
 import { Skeleton } from "@/components/ui/skeleton";
 import { ContactChip } from "@/components/ContactChip";
 import { createClient } from "@/lib/supabase/client";
-import type { Interest, InterestStatus, Plan } from "@/lib/types";
+import { INTEREST_STATUS_LABEL, type Interest, type InterestStatus, type Plan } from "@/lib/types";
 
 type Row = Pick<Interest, "id" | "plan_id" | "visitor_name" | "contact_handle" | "user_id" | "status" | "created_at">;
 
@@ -16,13 +16,6 @@ export type InterestPerson = {
   contact: string;
   /** Newest reaction first. */
   reactions: { interestId: string; planId: string; status: InterestStatus; created_at: string }[];
-};
-
-const STATUS_NOTE: Partial<Record<InterestStatus, string>> = {
-  pending: "waiting",
-  approved: "in",
-  declined: "declined",
-  waitlisted: "waitlist",
 };
 
 /**
@@ -52,7 +45,7 @@ export function InterestOverviewDrawer({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  plans: Pick<Plan, "id" | "title" | "capacity">[];
+  plans: Pick<Plan, "id" | "title">[];
   /** Open that plan's own interest drawer. */
   onOpenPlan: (planId: string) => void;
 }) {
@@ -83,7 +76,6 @@ export function InterestOverviewDrawer({
   const people = rows ? groupInterestByPerson(rows) : null;
   const total = rows?.length ?? 0;
   const title = (id: string) => plans.find((p) => p.id === id)?.title ?? "A plan";
-  const hasSpots = (id: string) => plans.find((p) => p.id === id)?.capacity != null;
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
@@ -130,9 +122,7 @@ export function InterestOverviewDrawer({
                           className="inline-flex max-w-full items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
                         >
                           <span className="truncate">{title(r.planId)}</span>
-                          {hasSpots(r.planId) && STATUS_NOTE[r.status] && (
-                            <span className="font-medium text-primary/70">· {STATUS_NOTE[r.status]}</span>
-                          )}
+                          <span className="font-medium text-primary/70">· {INTEREST_STATUS_LABEL[r.status]}</span>
                           <ChevronRight className="size-3 shrink-0" />
                         </button>
                       </li>

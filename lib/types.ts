@@ -94,7 +94,17 @@ export function countLeads(leads: Pick<Interest, "status">[]): LeadCounts {
 export type Spots = { capacity: number; taken: number };
 
 /** "waitlisted": the plan was full; promote_waitlist moves people to "pending" in order. */
-export type InterestStatus = "interested" | "pending" | "approved" | "declined" | "waitlisted";
+export const INTEREST_STATUSES = ["interested", "pending", "approved", "declined", "waitlisted"] as const;
+export type InterestStatus = (typeof INTEREST_STATUSES)[number];
+
+/** Short owner-facing label for each status (Record: a new status won't compile without one). */
+export const INTEREST_STATUS_LABEL: Record<InterestStatus, string> = {
+  interested: "interested",
+  pending: "waiting",
+  approved: "in",
+  declined: "declined",
+  waitlisted: "waitlist",
+};
 
 export type Interest = {
   id: string;
