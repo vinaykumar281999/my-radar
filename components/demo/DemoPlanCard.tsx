@@ -36,7 +36,7 @@ export function DemoPlanCard({
     <article className={cn("tap-card", compact ? "p-3.5" : "p-4", className)}>
       <div className="flex items-start justify-between gap-3">
         <CategoryLabel category={plan.category} />
-        <StatusPill status={status} className="transition-colors" />
+        <StatusPill status={status} category={plan.category} className="transition-colors" />
       </div>
       <h3 className={cn("mt-2 leading-snug font-bold tracking-tight text-balance", compact ? "text-base" : "text-lg")}>
         {plan.title}

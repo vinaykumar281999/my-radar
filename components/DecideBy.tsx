@@ -18,9 +18,9 @@ function subscribe(onChange: () => void) {
  * HTML never depends on the date; the countdown and colour come from the
  * viewer's own local date in the browser.
  */
-export function DecideBy({ date, className }: { date: string; className?: string }) {
+export function DecideBy({ date, category, className }: { date: string; category?: string; className?: string }) {
   const today = useSyncExternalStore(subscribe, () => localIsoDate(), () => null);
-  const info = today ? decideByInfo(date, today) : null;
+  const info = today ? decideByInfo(date, today, category) : null;
   return (
     <span
       className={cn(
@@ -34,7 +34,7 @@ export function DecideBy({ date, className }: { date: string; className?: string
       )}
     >
       <Hourglass className="size-3" aria-hidden />
-      {info ? info.text : decideByStatic(date)}
+      {info ? info.text : decideByStatic(date, category)}
     </span>
   );
 }

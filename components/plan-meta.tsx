@@ -1,6 +1,6 @@
 import { Car, Mountain, Music, Plane, Trophy, Wine, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Category, Status } from "@/lib/types";
+import { statusLabel, type Category, type Status } from "@/lib/types";
 
 export const CATEGORY_ICONS: Record<Category, LucideIcon> = {
   Trip: Plane,
@@ -53,7 +53,8 @@ export function CategoryLabel({ category, className }: { category: Category; cla
   );
 }
 
-export function StatusPill({ status, className }: { status: Status; className?: string }) {
+/** A plan's status; carpools read "Might drive 🤔" / "Driving 🚗" / "Confirmed ✅" (statusLabel). */
+export function StatusPill({ status, category, className }: { status: Status; category?: string; className?: string }) {
   const s = STATUS_STYLES[status];
   return (
     <span
@@ -64,7 +65,7 @@ export function StatusPill({ status, className }: { status: Status; className?: 
       )}
     >
       <span className={cn("size-1.5 rounded-full", s.dot)} aria-hidden />
-      {status}
+      {statusLabel(status, category)}
     </span>
   );
 }

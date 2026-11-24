@@ -15,7 +15,7 @@ import {
 import { CATEGORY_EMOJI, STATUS_STYLES } from "@/components/plan-meta";
 import { useHost } from "@/hooks/use-origin";
 import { storyPlans } from "@/lib/audience";
-import { sortPlans, type Plan, type Profile } from "@/lib/types";
+import { sortPlans, statusLabel, type Plan, type Profile } from "@/lib/types";
 
 type StoryExportModalProps = {
   open: boolean;
@@ -148,7 +148,7 @@ export function StoryExportModal({ open, onOpenChange, profile, plans }: StoryEx
                         background: STATUS_STYLES[plan.status].hex,
                         flexShrink: 0,
                       }}
-                      title={plan.status}
+                      title={statusLabel(plan.status, plan.category)}
                     />
                   </div>
                 ))

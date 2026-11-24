@@ -23,7 +23,7 @@ const unreadable = (r) => denied(r) || (!r.error && r.data.length === 0);
 // --- Schema present -----------------------------------------------------------
 let r = await sb
   .from("plans")
-  .select("suggested_by_handle, chained_from_plan_id, visibility, start_date, end_date, dates_flexible, capacity, origin, destination, departs_at, departs_tz")
+  .select("suggested_by_handle, chained_from_plan_id, visibility, start_date, end_date, dates_flexible, capacity, origin, destination, departs_at, departs_tz, round_trip, returns_at, gas_split, gas_currency, stops, decide_by")
   .limit(1);
 check("plans has chain, visibility, date (incl. dates_flexible), spots and carpool columns", !r.error, r.error?.message);
 r = await sb.from("interests").select("status, user_id, can_drive, large_bag, promoted_at").limit(1);

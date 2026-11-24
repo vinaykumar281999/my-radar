@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { CategoryLabel, STATUS_STYLES } from "@/components/plan-meta";
 import { daysInRange, formatDateRange, isoFromParts, todayIso, toUtcDate } from "@/lib/dates";
 import { cn } from "@/lib/utils";
-import type { Plan } from "@/lib/types";
+import { statusLabel, type Plan } from "@/lib/types";
 
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
 const monthFmt = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
@@ -112,7 +112,7 @@ export function MonthView({ plans, onSelect }: { plans: Plan[]; onSelect: (plan:
                   <CategoryLabel category={plan.category} />
                   <span className="mt-0.5 block font-semibold">{plan.title}</span>
                   <span className="block text-xs text-muted-foreground">
-                    {formatDateRange(plan.start_date!, plan.end_date)} · {plan.status}
+                    {formatDateRange(plan.start_date!, plan.end_date)} · {statusLabel(plan.status, plan.category)}
                   </span>
                 </button>
               </li>
