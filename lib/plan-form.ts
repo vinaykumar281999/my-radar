@@ -60,7 +60,7 @@ const VISIBILITY_SHORT = { public: "Public", unlisted: "Unlisted", circles: "Cir
 
 /** One line for the collapsed "More options" row: "Public · no dates", "Circles · Dec 11–14 · 4 spots"… */
 export function moreOptionsSummary(
-  form: MoreOptionsFields & Partial<Pick<PlanInput, "origin" | "destination">>,
+  form: MoreOptionsFields & Partial<Pick<PlanInput, "origin" | "destination" | "round_trip">>,
   { circleNames = [] as string[] } = {},
 ): string {
   const parts: string[] =
@@ -70,12 +70,15 @@ export function moreOptionsSummary(
   if (form.category === "Carpool") {
     if (form.origin?.trim() && form.destination?.trim()) parts.push(`${form.origin.trim()} → ${form.destination.trim()}`);
     else parts.push("route needed");
+    if (form.round_trip) parts.push("round trip");
   } else {
     parts.push(form.start_date ? formatDateRange(form.start_date, form.end_date || null) : "no dates");
     if (form.dates_flexible) parts.push("flexible");
   }
   if (form.capacity != null) parts.push(`${form.capacity} ${form.category === "Carpool" ? "seats" : "spots"}`);
-  if (form.status === "Booking Soon" && form.decide_by) parts.push(`decide by ${shortDate(form.decide_by)}`);
+  if (form.status === "Booking Soon" && form.decide_by) {
+    parts.push(`${form.category === "Carpool" ? "confirm seats by" : "decide by"} ${shortDate(form.decide_by)}`);
+  }
   return parts.join(" · ");
 }
 

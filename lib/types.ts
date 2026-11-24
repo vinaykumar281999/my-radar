@@ -27,6 +27,18 @@ export const VISIBILITIES = ["public", "unlisted", "circles"] as const;
 export type Category = (typeof CATEGORIES)[number];
 export type Timeframe = (typeof TIMEFRAMES)[number];
 export type Status = (typeof STATUSES)[number];
+
+/** What carpools call each status (same stored values; only the words change). */
+export const CARPOOL_STATUS_LABELS: Record<Status, string> = {
+  "Just an Idea": "Might drive 🤔",
+  "Booking Soon": "Driving 🚗",
+  "Locked In": "Confirmed ✅",
+};
+
+/** The status as people should read it: carpools have their own words. */
+export function statusLabel(status: Status, category?: string | null): string {
+  return category === "Carpool" ? CARPOOL_STATUS_LABELS[status] : status;
+}
 export type Visibility = (typeof VISIBILITIES)[number];
 
 export type Profile = {
@@ -74,6 +86,13 @@ export type Plan = {
   poll_picked_option_id: string | null;
   /** Booking Soon plans: an optional "decide by" date ("YYYY-MM-DD"), shown publicly. */
   decide_by: string | null;
+  /** Carpools only, public like the route: round trip + return (in departs_tz), gas per person, stops. */
+  round_trip: boolean;
+  returns_at: string | null;
+  gas_split: number | null;
+  /** ISO code, from the driver's browser locale when they entered gas_split. */
+  gas_currency: string | null;
+  stops: string | null;
   created_at: string;
 };
 
@@ -276,6 +295,11 @@ export type PlanInput = Pick<
   | "destination"
   | "departs_at"
   | "departs_tz"
+  | "round_trip"
+  | "returns_at"
+  | "gas_split"
+  | "gas_currency"
+  | "stops"
 >;
 
 /** Carpool pickup spot and driver contact: owner + approved riders only (RLS). */

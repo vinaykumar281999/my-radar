@@ -2,7 +2,8 @@ import { CATEGORY_EMOJI } from "@/components/plan-meta";
 import { buildCalendar } from "@/lib/ics";
 import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { Plan, Profile } from "@/lib/types";
+import { statusLabel, type Plan, type Profile } from "@/lib/types";
+import { carpoolExtras } from "@/lib/carpool";
 
 const TOKEN_RE = /^[0-9a-f]{64}$/;
 
@@ -56,8 +57,9 @@ export async function GET(request: Request, { params }: RouteContext<"/api/ical/
       startAt: plan.category === "Carpool" ? plan.departs_at : null,
       description: [
         plan.category === "Carpool" && plan.origin && plan.destination ? `${plan.origin} → ${plan.destination}` : null,
+        ...(plan.category === "Carpool" ? carpoolExtras(plan) : []),
         plan.notes,
-        `Status: ${plan.status}`,
+        `Status: ${statusLabel(plan.status, plan.category)}`,
         plan.visibility === "unlisted" ? "Unlisted" : plan.visibility === "circles" ? "Circles only" : null,
       ]
         .filter(Boolean)

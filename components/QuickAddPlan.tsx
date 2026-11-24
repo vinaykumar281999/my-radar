@@ -11,11 +11,13 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { PillGroup } from "@/components/PillGroup";
 import { CATEGORY_ICONS, STATUS_STYLES } from "@/components/plan-meta";
+import { GAS_SPLIT_MAX, STOPS_MAX, currencyForLocale } from "@/lib/carpool";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import {
   CATEGORIES,
   STATUSES,
+  statusLabel,
   TIMEFRAMES,
   VISIBILITIES,
   effectiveTimeframe,
@@ -68,6 +70,11 @@ const EMPTY: PlanInput = {
   destination: "",
   departs_at: null,
   departs_tz: null,
+  round_trip: false,
+  returns_at: null,
+  gas_split: null,
+  gas_currency: null,
+  stops: null,
 };
 
 const VISIBILITY_LABELS: Record<Visibility, string> = { public: "Public", unlisted: "Unlisted", circles: "Circles" };
@@ -144,6 +151,11 @@ function PlanForm({
           destination: editing.destination ?? "",
           departs_at: editing.departs_at,
           departs_tz: editing.departs_tz,
+          round_trip: editing.round_trip ?? false,
+          returns_at: editing.returns_at ?? null,
+          gas_split: editing.gas_split != null ? Number(editing.gas_split) : null,
+          gas_currency: editing.gas_currency ?? null,
+          stops: editing.stops ?? "",
         }
       : EMPTY,
   );
@@ -166,6 +178,12 @@ function PlanForm({
   const [departure, setDeparture] = useState(() =>
     editing?.departs_at && editing.departs_tz ? utcToZonedInput(editing.departs_at, editing.departs_tz) : "",
   );
+  // Return (round trips): same zone as the departure.
+  const [returnTime, setReturnTime] = useState(() =>
+    editing?.returns_at && editing.departs_tz ? utcToZonedInput(editing.returns_at, editing.departs_tz) : "",
+  );
+  // A gas split is in the driver's own currency: what they stored, or their browser's.
+  const [gasCurrency] = useState(() => editing?.gas_currency ?? currencyForLocale(globalThis.navigator?.language));
   const [privateDetails, setPrivateDetails] = useState({ pickup: "", contact: "", note: "", loaded: !editing });
   const [confirmPublic, setConfirmPublic] = useState(
     !!editing && editing.category === "Carpool" && editing.visibility === "public",
@@ -272,6 +290,11 @@ function PlanForm({
         setMoreOpen(true);
         return;
       }
+      if (form.round_trip && returnTime && returnTime <= departure) {
+        setError("The return has to be after the departure.");
+        setMoreOpen(true);
+        return;
+      }
       if (form.visibility === "public" && !confirmPublic) {
         setError("Tick the box to confirm posting this carpool publicly.");
         setMoreOpen(true);
@@ -314,6 +337,12 @@ function PlanForm({
       destination: isCarpool ? form.destination?.trim() || null : null,
       departs_at: isCarpool ? zonedInputToUtc(departure, tz) : null,
       departs_tz: isCarpool ? tz : null,
+      // Long-trip details exist only on carpools (the database enforces it too).
+      round_trip: isCarpool && !!form.round_trip,
+      returns_at: isCarpool && form.round_trip && returnTime ? zonedInputToUtc(returnTime, tz) : null,
+      gas_split: isCarpool ? form.gas_split : null,
+      gas_currency: isCarpool && form.gas_split != null ? gasCurrency : null,
+      stops: isCarpool ? form.stops?.trim().slice(0, STOPS_MAX) || null : null,
       ...(isCarpool && start
         ? { timeframe: effectiveTimeframe({ start_date: start, timeframe: form.timeframe, created_at: "" }) }
         : {}),
@@ -454,7 +483,7 @@ function PlanForm({
           }}
           renderOption={(s) => (
             <>
-              <span className={cn("size-1.5 rounded-full", STATUS_STYLES[s].dot)} /> {s}
+              <span className={cn("size-1.5 rounded-full", STATUS_STYLES[s].dot)} /> {statusLabel(s, form.category)}
             </>
           )}
         />
@@ -470,7 +499,7 @@ function PlanForm({
             id="plan-notes"
             value={form.notes ?? ""}
             onChange={(e) => set("notes", e.target.value)}
-            placeholder="Need 2 more for the campsite"
+            placeholder={isCarpool ? "Leaving from the north lot, room for skis" : "Need 2 more for the campsite"}
             maxLength={140}
             className="h-11 text-base"
           />
@@ -503,7 +532,7 @@ function PlanForm({
             <div id="plan-more-options" className="space-y-5 border-t px-3 pt-4 pb-4">
               {form.status === "Booking Soon" && (
                 <div className="space-y-1.5">
-                  <Label htmlFor="decide_by">Decide by (optional)</Label>
+                  <Label htmlFor="decide_by">{isCarpool ? "Confirm seats by" : "Decide by"} <span className="font-normal text-muted-foreground">(optional)</span></Label>
                   <Input
                     id="decide_by"
                     type="date"
@@ -512,7 +541,9 @@ function PlanForm({
                     className="h-11 text-base"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Friends see a countdown, so they don&apos;t miss the cut-off.
+                    {isCarpool
+                      ? "Riders see a countdown, so they confirm their seat in time."
+                      : "Friends see a countdown, so they don't miss the cut-off."}
                   </p>
                 </div>
               )}
@@ -680,6 +711,11 @@ function PlanForm({
                   departure={departure}
                   tz={tz}
                   seats={form.capacity}
+                  roundTrip={!!form.round_trip}
+                  returnTime={returnTime}
+                  gasSplit={form.gas_split}
+                  gasCurrency={gasCurrency}
+                  stops={form.stops ?? ""}
                   pickup={privateDetails.pickup}
                   contact={privateDetails.contact}
                   note={privateDetails.note}
@@ -689,6 +725,10 @@ function PlanForm({
                     if ("destination" in change) set("destination", change.destination ?? "");
                     if ("seats" in change) setUserCapacity(change.seats ?? null);
                     if ("departure" in change) setDeparture(change.departure ?? "");
+                    if ("roundTrip" in change) set("round_trip", !!change.roundTrip);
+                    if ("returnTime" in change) setReturnTime(change.returnTime ?? "");
+                    if ("gasSplit" in change) set("gas_split", change.gasSplit ?? null);
+                    if ("stops" in change) set("stops", change.stops ?? "");
                     if ("pickup" in change || "contact" in change || "note" in change) {
                       setPrivateDetails((d) => ({ ...d, ...change }));
                     }
@@ -719,6 +759,10 @@ type CarpoolChange = Partial<{
   destination: string;
   departure: string;
   seats: number | null;
+  roundTrip: boolean;
+  returnTime: string;
+  gasSplit: number | null;
+  stops: string;
   pickup: string;
   contact: string;
   note: string;
@@ -731,6 +775,11 @@ function CarpoolFields({
   departure,
   tz,
   seats,
+  roundTrip,
+  returnTime,
+  gasSplit,
+  gasCurrency,
+  stops,
   pickup,
   contact,
   note,
@@ -742,6 +791,11 @@ function CarpoolFields({
   departure: string;
   tz: string;
   seats: number | null;
+  roundTrip: boolean;
+  returnTime: string;
+  gasSplit: number | null;
+  gasCurrency: string;
+  stops: string;
   pickup: string;
   contact: string;
   note: string;
@@ -803,6 +857,72 @@ function CarpoolFields({
         <p className="col-span-2 -mt-1.5 text-xs text-muted-foreground">
           Time is in {tz.replace(/_/g, " ")}. Riders request a seat and you approve them.
         </p>
+      </div>
+
+      {/* Longer trips: public like the route. */}
+      <div className="space-y-3 border-t pt-3">
+        <p className="text-xs font-semibold">
+          Longer trip <span className="font-normal text-muted-foreground">(optional, shown with the route)</span>
+        </p>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={roundTrip}
+            onChange={(e) => onChange({ roundTrip: e.target.checked })}
+            className="size-4 accent-foreground"
+          />
+          Round trip
+        </label>
+        {roundTrip && (
+          <div className="space-y-1.5">
+            <Label htmlFor="carpool-return">
+              Coming back <span className="font-normal text-muted-foreground">(optional)</span>
+            </Label>
+            <Input
+              id="carpool-return"
+              type="datetime-local"
+              value={returnTime}
+              min={departure || undefined}
+              onChange={(e) => onChange({ returnTime: e.target.value })}
+              className="h-11 text-base"
+            />
+          </div>
+        )}
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="carpool-gas">
+              Gas split per person <span className="font-normal text-muted-foreground">({gasCurrency}, optional)</span>
+            </Label>
+            <Input
+              id="carpool-gas"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              max={GAS_SPLIT_MAX}
+              step="0.01"
+              value={gasSplit ?? ""}
+              onChange={(e) => {
+                const n = Number.parseFloat(e.target.value);
+                onChange({ gasSplit: Number.isNaN(n) ? null : Math.min(GAS_SPLIT_MAX, Math.max(0, Math.round(n * 100) / 100)) });
+              }}
+              placeholder="40"
+              className="h-11 w-32 text-base"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="carpool-stops">
+              Stops <span className="font-normal text-muted-foreground">(optional)</span>
+            </Label>
+            <Input
+              id="carpool-stops"
+              value={stops}
+              onChange={(e) => onChange({ stops: e.target.value })}
+              placeholder="Can pick up in Fort Collins"
+              maxLength={STOPS_MAX}
+              className="h-11 text-base"
+            />
+          </div>
+        </div>
       </div>
 
       <div className="space-y-3 border-t pt-3">

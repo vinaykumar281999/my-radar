@@ -50,7 +50,8 @@ import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { formatDeparture } from "@/lib/dates";
 import { planWhen, sortByWhen } from "@/lib/plan-when";
-import { STATUSES, commitmentSummary, type BlockResult, type CircleOption, countLeads, type LeadCounts, type JoinNotice, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
+import { carpoolExtras } from "@/lib/carpool";
+import { STATUSES, commitmentSummary, statusLabel, type BlockResult, type CircleOption, countLeads, type LeadCounts, type JoinNotice, type Pitch, type Plan, type PlanWithCount, type Profile, type Status } from "@/lib/types";
 
 type DashboardClientProps = {
   profile: Profile;
@@ -528,7 +529,7 @@ function ManagePlanRow({
           <CategoryIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-label={plan.category} />
           <span className="line-clamp-2">{plan.title}</span>
         </p>
-        <StatusMenu status={plan.status} onChange={onStatus} />
+        <StatusMenu status={plan.status} category={plan.category} onChange={onStatus} />
       </div>
 
       <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
@@ -551,7 +552,13 @@ function ManagePlanRow({
             <EyeOff className="size-2.5" /> Unlisted
           </span>
         )}
-        {plan.status === "Booking Soon" && plan.decide_by && <DecideBy date={plan.decide_by} className="px-1.5 py-px text-[10px]" />}
+        {plan.status === "Booking Soon" && plan.decide_by && <DecideBy date={plan.decide_by} category={plan.category} className="px-1.5 py-px text-[10px]" />}
+        {isCarpool &&
+          carpoolExtras(plan).map((x) => (
+            <span key={x} className="max-w-full truncate rounded-full bg-muted px-1.5 py-px text-[10px] font-medium text-foreground/80">
+              {x}
+            </span>
+          ))}
         {canPoll && plan.poll_option_count > 0 && (
           <button
             type="button"
@@ -618,7 +625,7 @@ function ManagePlanRow({
 }
 
 /** Small status pill; tapping it opens the three statuses. */
-function StatusMenu({ status, onChange }: { status: Status; onChange: (s: Status) => void }) {
+function StatusMenu({ status, category, onChange }: { status: Status; category: string; onChange: (s: Status) => void }) {
   return (
     <Menu.Root>
       <Menu.Trigger
@@ -626,17 +633,17 @@ function StatusMenu({ status, onChange }: { status: Status; onChange: (s: Status
           "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap ring-1 ring-inset outline-none focus-visible:ring-2 focus-visible:ring-ring",
           STATUS_STYLES[status].pill,
         )}
-        aria-label={`Status: ${status}. Change status`}
+        aria-label={`Status: ${statusLabel(status, category)}. Change status`}
       >
         <span className={cn("size-1.5 rounded-full", STATUS_STYLES[status].dot)} aria-hidden />
-        {status}
+        {statusLabel(status, category)}
         <ChevronDown className="size-3 opacity-60" aria-hidden />
       </Menu.Trigger>
       <MenuContent>
         {STATUSES.map((s) => (
           <Menu.Item key={s} className={menuItemClass} onClick={() => s !== status && onChange(s)}>
             <span className={cn("size-2 rounded-full", STATUS_STYLES[s].dot, "animate-none")} aria-hidden />
-            <span className="flex-1">{s}</span>
+            <span className="flex-1">{statusLabel(s, category)}</span>
             {s === status && <Check aria-label="current" />}
           </Menu.Item>
         ))}

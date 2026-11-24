@@ -19,6 +19,11 @@ const base: PlanInput = {
   destination: "",
   departs_at: null,
   departs_tz: null,
+  round_trip: false,
+  returns_at: null,
+  gas_split: null,
+  gas_currency: null,
+  stops: null,
 };
 
 test("a new, plain plan starts with More options closed", () => {

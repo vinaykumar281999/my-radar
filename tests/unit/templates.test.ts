@@ -20,6 +20,11 @@ const EMPTY: PlanInput = {
   destination: "",
   departs_at: null,
   departs_tz: null,
+  round_trip: false,
+  returns_at: null,
+  gas_split: null,
+  gas_currency: null,
+  stops: null,
 };
 
 test("every template has a valid category and starts as Just an Idea", () => {

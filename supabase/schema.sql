@@ -86,6 +86,30 @@ alter table public.plans add constraint plans_carpool_fields
     and departs_at is not null and departs_tz is not null
   ));
 
+-- Optional long-trip details for carpools, public like the route: a round
+-- trip and its return time (shown in departs_tz, like the departure), a gas
+-- split per person in the driver's currency, and stops along the way.
+alter table public.plans add column if not exists round_trip boolean not null default false;
+alter table public.plans add column if not exists returns_at timestamptz;
+alter table public.plans add column if not exists gas_split numeric(7, 2);
+alter table public.plans add column if not exists gas_currency text;
+alter table public.plans add column if not exists stops text;
+alter table public.plans drop constraint if exists plans_carpool_extras_only;
+alter table public.plans add constraint plans_carpool_extras_only
+  check (category = 'Carpool' or (not round_trip and returns_at is null and gas_split is null and gas_currency is null and stops is null));
+alter table public.plans drop constraint if exists plans_return_after_departure;
+alter table public.plans add constraint plans_return_after_departure
+  check (returns_at is null or (round_trip and departs_at is not null and returns_at > departs_at));
+alter table public.plans drop constraint if exists plans_gas_split_range;
+alter table public.plans add constraint plans_gas_split_range
+  check (gas_split is null or (gas_split >= 0 and gas_split <= 1000));
+alter table public.plans drop constraint if exists plans_gas_currency;
+alter table public.plans add constraint plans_gas_currency
+  check ((gas_split is null) = (gas_currency is null) and (gas_currency is null or gas_currency ~ '^[A-Z]{3}$'));
+alter table public.plans drop constraint if exists plans_stops_length;
+alter table public.plans add constraint plans_stops_length
+  check (stops is null or char_length(stops) between 1 and 120);
+
 -- "Flexible on dates": a public hint that the dates can move. Carpools leave
 -- at a fixed time, so they're never flexible.
 alter table public.plans add column if not exists dates_flexible boolean not null default false;

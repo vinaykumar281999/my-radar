@@ -15,6 +15,7 @@ import { useViewer, useViewerStatus } from "@/components/ViewerContext";
 import { CarpoolDetails } from "@/components/CarpoolDetails";
 import { DatePoll } from "@/components/DatePoll";
 import { DecideBy } from "@/components/DecideBy";
+import { carpoolExtras } from "@/lib/carpool";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { PROMOTION_DISMISSED_EVENT, isUnseenPromotion } from "@/lib/promotion-notices";
@@ -47,6 +48,11 @@ type PlanCardProps = {
         | "departs_tz"
         | "poll_closed_at"
         | "decide_by"
+        | "round_trip"
+        | "returns_at"
+        | "gas_split"
+        | "gas_currency"
+        | "stops"
       >
     >;
   hostName: string;
@@ -83,7 +89,7 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
     <article className={cn("tap-card p-4", className)}>
       <div className="flex items-start justify-between gap-3">
         <CategoryLabel category={plan.category} />
-        <StatusPill status={plan.status} />
+        <StatusPill status={plan.status} category={plan.category} />
       </div>
 
       {sharedVia && (
@@ -101,12 +107,17 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
         </p>
       )}
 
-      {isCarpool && plan.departs_at && plan.departs_tz ? (
+      {isCarpool && plan.departs_at && plan.departs_tz && (
         <p className="mt-1 inline-flex items-center gap-1.5 text-sm text-muted-foreground">
           <CalendarDays className="size-3.5" aria-hidden />
           Leaves {formatDeparture(plan.departs_at, plan.departs_tz)}
         </p>
-      ) : (plan.start_date || plan.specific_dates) && (
+      )}
+      {/* Long-trip details, only when the driver set them (public, like the route). */}
+      {isCarpool && carpoolExtras(plan).length > 0 && (
+        <p className="mt-1 text-sm text-muted-foreground">{carpoolExtras(plan).join(" · ")}</p>
+      )}
+      {!isCarpool && (plan.start_date || plan.specific_dates) && (
         <p className="mt-1 inline-flex items-center gap-1.5 text-sm text-muted-foreground">
           <CalendarDays className="size-3.5" aria-hidden />
           {plan.start_date ? formatDateRange(plan.start_date, plan.end_date) : plan.specific_dates}
@@ -117,7 +128,7 @@ export function PlanCard({ plan, hostName, hostUsername, demo, sharedVia, spots,
 
       {plan.status === "Booking Soon" && plan.decide_by && (
         <p className="mt-2">
-          <DecideBy date={plan.decide_by} />
+          <DecideBy date={plan.decide_by} category={plan.category} />
         </p>
       )}
 
